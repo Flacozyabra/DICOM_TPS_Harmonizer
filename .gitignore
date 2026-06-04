@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+Dicom_input/
+Dicom_output/
+*.pyc
+dicom_input/
+dicom_output/
+.idea/
+.vscode/
