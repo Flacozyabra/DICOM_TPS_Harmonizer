@@ -15,6 +15,7 @@
 * **Удобная структура папок:** Группирует результаты в виде:  
   `Dicom_output / <Имя_Пациента>_<ID_Пациента> / <Модальность_Описание_Серии> / slice_XXXX.dcm`
 * **Современный GUI:** Интерфейс на базе `CustomTkinter` с темной темой, прогресс-баром и интерактивным цветовым логированием операций в реальном времени.
+* **Мультиязычность:** Встроенная поддержка русского и английского языков для интерфейса и логов процессора.
 
 ### Использование готовой сборки
 Вы можете скачать уже собранный исполняемый файл `.exe` для Windows из раздела [Releases](https://github.com/Flacozyabra/DICOM_TPS_Harmonizer/releases) на GitHub. Он не требует установки Python или каких-либо зависимостей.
@@ -41,6 +42,7 @@
 * **Clear Directory Hierarchy:** Outputs structured patient datasets:  
   `Dicom_output / <PatientName>_<PatientID> / <Modality_SeriesDescription> / slice_XXXX.dcm`
 * **Modern GUI:** Powered by `CustomTkinter` with a dark theme, real-time progress bar, and color-coded operation logs.
+* **Multi-language support:** Built-in Russian and English localizations for both GUI and execution logs.
 
 ### Using pre-built binaries
 You can download the compiled standalone `.exe` for Windows from the [Releases](https://github.com/Flacozyabra/DICOM_TPS_Harmonizer/releases) section. No Python installation or manual dependencies configuration is required.
