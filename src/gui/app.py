@@ -1,10 +1,14 @@
 from datetime import datetime
+import json
+import os
 import queue
 import sys
 import threading
 from pathlib import Path
 from tkinter import filedialog
 from typing import Any
+
+from PIL import Image
 
 import customtkinter as ctk
 
@@ -14,6 +18,61 @@ from src.utils.logger import QueueLogger
 
 # Настройки оформления CustomTkinter
 ctk.set_appearance_mode("dark")
+
+
+class CustomQuestionDialog(ctk.CTkToplevel):
+    """Кастомный диалог с вопросом о создании папок и тремя кнопками выбора."""
+
+    def __init__(self, parent: ctk.CTk, title: str, message: str) -> None:
+        super().__init__(parent)
+        self.title(title)
+        self.result = None
+
+        self.geometry("400x150")
+        self.resizable(False, False)
+        
+        # Поверх родительского окна и блокировка взаимодействия
+        self.transient(parent)
+        self.grab_set()
+
+        # Центрирование относительно родителя
+        parent.update_idletasks()
+        x = parent.winfo_x() + (parent.winfo_width() - 400) // 2
+        y = parent.winfo_y() + (parent.winfo_height() - 150) // 2
+        self.geometry(f"+{x}+{y}")
+
+        # Сообщение
+        lbl = ctk.CTkLabel(self, text=message, wraplength=360, font=ctk.CTkFont(size=13))
+        lbl.pack(pady=(20, 20), padx=20)
+
+        # Контейнер для кнопок
+        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
+        btn_frame.pack(fill="x", padx=20, pady=(0, 15))
+
+        # Кнопки: Да, Нет, Создать обе
+        btn_yes = ctk.CTkButton(btn_frame, text="Да", width=90, command=self.on_yes)
+        btn_yes.pack(side="left", padx=5, expand=True)
+
+        btn_no = ctk.CTkButton(btn_frame, text="Нет", width=90, command=self.on_no)
+        btn_no.pack(side="left", padx=5, expand=True)
+
+        btn_both = ctk.CTkButton(btn_frame, text="Создать обе", width=120, command=self.on_both)
+        btn_both.pack(side="left", padx=5, expand=True)
+
+        # Ждем закрытия
+        self.wait_window()
+
+    def on_yes(self) -> None:
+        self.result = "yes"
+        self.destroy()
+
+    def on_no(self) -> None:
+        self.result = "no"
+        self.destroy()
+
+    def on_both(self) -> None:
+        self.result = "both"
+        self.destroy()
 
 
 class DicomSplitterApp(ctk.CTk):
@@ -58,9 +117,10 @@ class DicomSplitterApp(ctk.CTk):
         # Очередь для вывода логов и прогресса из фонового потока
         self.log_queue: queue.Queue[tuple[str, Any, Any] | tuple[str, Any]] = queue.Queue()
         
-        # Переменные для хранения путей к папкам
-        self.input_dir_var = ctk.StringVar(value=str(project_root / "Dicom_input"))
-        self.output_dir_var = ctk.StringVar(value=str(project_root / "Dicom_output"))
+        # Загрузка путей (с поддержкой AppData и плейсхолдеров при первом запуске)
+        saved_input, saved_output = self.load_last_paths()
+        self.input_dir_var = ctk.StringVar(value=saved_input)
+        self.output_dir_var = ctk.StringVar(value=saved_output)
         
         # Переменные для чекбоксов настроек
         self.new_uids_var = ctk.BooleanVar(value=True)
@@ -79,12 +139,114 @@ class DicomSplitterApp(ctk.CTk):
         # Запуск таймера для чтения логов из очереди в главном потоке
         self.after(100, self.update_log_queue)
 
+    def get_config_path(self) -> Path:
+        """Возвращает путь к файлу конфигурации в AppData пользователя."""
+        appdata = os.getenv("APPDATA")
+        if appdata:
+            config_dir = Path(appdata) / "DicomTpsHarmonizer"
+        else:
+            config_dir = Path.home() / ".dicom_tps_harmonizer"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        return config_dir / "config.json"
+
+    def load_last_paths(self) -> tuple[str, str]:
+        """Загружает последние выбранные пути.
+        
+        Если конфига нет (первый запуск), возвращает плейсхолдеры.
+        """
+        config_file = self.get_config_path()
+        if config_file.exists():
+            try:
+                with open(config_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    inp = data.get("input_dir", "")
+                    out = data.get("output_dir", "")
+                    if inp and out:
+                        return inp, out
+            except Exception:
+                pass
+        return "Введите путь для папки Dicom_input", "Введите путь для папки Dicom_output"
+
+    def save_last_paths(self) -> None:
+        """Сохраняет текущие пути из GUI в файл конфигурации."""
+        inp = self.input_dir_var.get()
+        out = self.output_dir_var.get()
+        
+        # Не сохраняем плейсхолдеры
+        if "Введите путь" in inp or "Введите путь" in out:
+            return
+            
+        config_file = self.get_config_path()
+        try:
+            with open(config_file, "w", encoding="utf-8") as f:
+                json.dump({"input_dir": inp, "output_dir": out}, f, ensure_ascii=False, indent=4)
+        except Exception:
+            pass
+
+    def ask_and_create_folder(self, dir_type: str) -> None:
+        """Запрашивает пользователя и создает соответствующую папку."""
+        folder_name = "Dicom_input" if dir_type == "input" else "Dicom_output"
+        message = f"Создать папку {folder_name} в папке с программой?"
+        
+        dialog = CustomQuestionDialog(self, "Создание папки", message)
+        result = dialog.result
+        
+        if not result or result == "no":
+            return
+            
+        # Определяем директорию запуска (учитываем скомпилированный EXE)
+        if getattr(sys, "frozen", False):
+            app_dir = Path(sys.executable).parent
+        else:
+            app_dir = Path(__file__).resolve().parents[2]
+            
+        input_path = app_dir / "Dicom_input"
+        output_path = app_dir / "Dicom_output"
+        
+        if result == "yes":
+            target_path = input_path if dir_type == "input" else output_path
+            try:
+                target_path.mkdir(parents=True, exist_ok=True)
+                if dir_type == "input":
+                    self.input_dir_var.set(str(target_path.resolve()))
+                else:
+                    self.output_dir_var.set(str(target_path.resolve()))
+                self.log_queue.put(("log", f"Создана папка: {target_path.resolve()}", "success"))
+            except Exception as e:
+                self.log_queue.put(("log", f"Ошибка при создании папки: {e}", "error"))
+                
+        elif result == "both":
+            try:
+                input_path.mkdir(parents=True, exist_ok=True)
+                output_path.mkdir(parents=True, exist_ok=True)
+                self.input_dir_var.set(str(input_path.resolve()))
+                self.output_dir_var.set(str(output_path.resolve()))
+                self.log_queue.put(("log", f"Созданы папки: {input_path.resolve()} и {output_path.resolve()}", "success"))
+            except Exception as e:
+                self.log_queue.put(("log", f"Ошибка при создании папок: {e}", "error"))
+                
+        self.save_last_paths()
+
     def create_widgets(self) -> None:
         """Инициализирует и позиционирует все виджеты на форме."""
         # Конфигурация сетки главного окна
         self.grid_rowconfigure(3, weight=1)  # Текстовое окно лога растягивается по вертикали
         self.grid_columnconfigure(0, weight=1)
         
+        # Загрузка иконок для кнопок
+        if getattr(sys, "frozen", False):
+            resources_dir = Path(sys._MEIPASS) / "themes"
+        else:
+            resources_dir = Path(__file__).resolve().parents[2] / "themes"
+            
+        icon_create_path = resources_dir / "create_folder.png"
+        icon_open_in_path = resources_dir / "open_folder_input.png"
+        icon_open_out_path = resources_dir / "open_folder_output.png"
+        
+        self.img_create = ctk.CTkImage(Image.open(icon_create_path), size=(20, 20)) if icon_create_path.exists() else None
+        self.img_open_in = ctk.CTkImage(Image.open(icon_open_in_path), size=(20, 20)) if icon_open_in_path.exists() else None
+        self.img_open_out = ctk.CTkImage(Image.open(icon_open_out_path), size=(20, 20)) if icon_open_out_path.exists() else None
+
         # 1. Заголовок
         title_label = ctk.CTkLabel(
             self, 
@@ -96,27 +258,80 @@ class DicomSplitterApp(ctk.CTk):
         # 2. Выбор папок
         folder_frame = ctk.CTkFrame(self)
         folder_frame.grid(row=1, column=0, padx=20, pady=10, sticky="nsew")
-        folder_frame.grid_columnconfigure(1, weight=1)
+        
+        folder_frame.grid_columnconfigure(0, weight=0)
+        folder_frame.grid_columnconfigure(1, weight=0)
+        folder_frame.grid_columnconfigure(2, weight=1)
+        folder_frame.grid_columnconfigure(3, weight=0)
+        folder_frame.grid_columnconfigure(4, weight=0)
         
         # Папка ввода
+        input_create_btn = ctk.CTkButton(
+            folder_frame,
+            text="",
+            image=self.img_create,
+            width=30,
+            height=30,
+            fg_color="transparent",
+            hover_color=("#E5E7EB", "#374151"),
+            command=lambda: self.ask_and_create_folder("input")
+        )
+        input_create_btn.grid(row=0, column=0, padx=(10, 5), pady=10)
+        
         input_label = ctk.CTkLabel(folder_frame, text="Папка ввода:", font=ctk.CTkFont(size=13, weight="bold"))
-        input_label.grid(row=0, column=0, padx=10, pady=10, sticky="w")
+        input_label.grid(row=0, column=1, padx=(5, 10), pady=10, sticky="w")
         
         input_entry = ctk.CTkEntry(folder_frame, textvariable=self.input_dir_var)
-        input_entry.grid(row=0, column=1, padx=10, pady=10, sticky="ew")
+        input_entry.grid(row=0, column=2, padx=10, pady=10, sticky="ew")
+        
+        input_open_btn = ctk.CTkButton(
+            folder_frame,
+            text="",
+            image=self.img_open_in,
+            width=30,
+            height=30,
+            fg_color="transparent",
+            hover_color=("#E5E7EB", "#374151"),
+            command=self.open_input_dir
+        )
+        input_open_btn.grid(row=0, column=3, padx=(5, 10), pady=10)
         
         input_btn = ctk.CTkButton(folder_frame, text="Обзор...", width=100, command=self.browse_input)
-        input_btn.grid(row=0, column=2, padx=10, pady=10)
+        input_btn.grid(row=0, column=4, padx=(0, 10), pady=10)
         
         # Папка вывода
+        output_create_btn = ctk.CTkButton(
+            folder_frame,
+            text="",
+            image=self.img_create,
+            width=30,
+            height=30,
+            fg_color="transparent",
+            hover_color=("#E5E7EB", "#374151"),
+            command=lambda: self.ask_and_create_folder("output")
+        )
+        output_create_btn.grid(row=1, column=0, padx=(10, 5), pady=(0, 10))
+        
         output_label = ctk.CTkLabel(folder_frame, text="Папка вывода:", font=ctk.CTkFont(size=13, weight="bold"))
-        output_label.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="w")
+        output_label.grid(row=1, column=1, padx=(5, 10), pady=(0, 10), sticky="w")
         
         output_entry = ctk.CTkEntry(folder_frame, textvariable=self.output_dir_var)
-        output_entry.grid(row=1, column=1, padx=10, pady=(0, 10), sticky="ew")
+        output_entry.grid(row=1, column=2, padx=10, pady=(0, 10), sticky="ew")
+        
+        output_open_btn = ctk.CTkButton(
+            folder_frame,
+            text="",
+            image=self.img_open_out,
+            width=30,
+            height=30,
+            fg_color="transparent",
+            hover_color=("#E5E7EB", "#374151"),
+            command=self.open_output_dir
+        )
+        output_open_btn.grid(row=1, column=3, padx=(5, 10), pady=(0, 10))
         
         output_btn = ctk.CTkButton(folder_frame, text="Обзор...", width=100, command=self.browse_output)
-        output_btn.grid(row=1, column=2, padx=10, pady=(0, 10))
+        output_btn.grid(row=1, column=4, padx=(0, 10), pady=(0, 10))
 
         # 3. Настройки (Чекбоксы)
         settings_frame = ctk.CTkFrame(self)
@@ -191,9 +406,7 @@ class DicomSplitterApp(ctk.CTk):
         control_frame = ctk.CTkFrame(self)
         control_frame.grid(row=4, column=0, padx=20, pady=(0, 20), sticky="nsew")
         
-        # Настройка сетки: колонка 0 растягивается, сдвигая кнопки вправо
         control_frame.grid_columnconfigure(0, weight=1)
-        control_frame.grid_columnconfigure((1, 2), weight=0)
         control_frame.grid_rowconfigure((0, 1, 2), weight=1)
         
         # Прогресс-бар
@@ -203,7 +416,7 @@ class DicomSplitterApp(ctk.CTk):
             corner_radius=8,
             border_width=1
         )
-        self.progress_bar.grid(row=0, column=0, columnspan=3, padx=15, pady=(15, 2), sticky="ew")
+        self.progress_bar.grid(row=0, column=0, padx=15, pady=(15, 2), sticky="ew")
         self.progress_bar.set(0)
         
         # Процентный индикатор под прогресс-баром
@@ -212,51 +425,67 @@ class DicomSplitterApp(ctk.CTk):
             text="Готов к работе (0%)", 
             font=ctk.CTkFont(size=11, weight="bold")
         )
-        self.percent_label.grid(row=1, column=0, columnspan=3, padx=15, pady=(0, 10), sticky="n")
-        
-        # Кнопка открытия папки вывода
-        self.open_output_btn = ctk.CTkButton(
-            control_frame, 
-            text="Открыть папку вывода", 
-            height=40,
-            width=200,
-            command=self.open_output_dir
-        )
-        self.open_output_btn.grid(row=2, column=1, padx=(15, 5), pady=(0, 15), sticky="e")
+        self.percent_label.grid(row=1, column=0, padx=15, pady=(0, 10), sticky="n")
         
         # Кнопка запуска оптимизации
         self.start_btn = ctk.CTkButton(
             control_frame, 
             text="Запустить оптимизацию", 
             font=ctk.CTkFont(weight="bold"),
-            width=240,
+            width=300,
             height=40,
             command=self.start_processing
         )
-        self.start_btn.grid(row=2, column=2, padx=(5, 15), pady=(0, 15), sticky="e")
+        self.start_btn.grid(row=2, column=0, padx=15, pady=(0, 15), sticky="n")
 
     # Методы обзора папок
     def browse_input(self) -> None:
         """Открывает диалог выбора входной папки."""
-        dir_path = filedialog.askdirectory(initialdir=self.input_dir_var.get())
+        initial = self.input_dir_var.get()
+        if "Введите путь" in initial:
+            initial = None
+        dir_path = filedialog.askdirectory(initialdir=initial)
         if dir_path:
             self.input_dir_var.set(str(Path(dir_path).resolve()))
+            self.save_last_paths()
 
     def browse_output(self) -> None:
         """Открывает диалог выбора папки для вывода."""
-        dir_path = filedialog.askdirectory(initialdir=self.output_dir_var.get())
+        initial = self.output_dir_var.get()
+        if "Введите путь" in initial:
+            initial = None
+        dir_path = filedialog.askdirectory(initialdir=initial)
         if dir_path:
             self.output_dir_var.set(str(Path(dir_path).resolve()))
+            self.save_last_paths()
+
+    def open_input_dir(self) -> None:
+        """Открывает входную папку в Проводнике Windows."""
+        inp_dir = self.input_dir_var.get()
+        if "Введите путь" in inp_dir:
+            self.log_queue.put(("log", "Ошибка: Путь ввода не настроен.", "error"))
+            return
+            
+        path = Path(inp_dir)
+        if path.exists():
+            import os
+            os.startfile(path)
+        else:
+            self.log_queue.put(("log", f"Папка ввода не существует: {path}", "warning"))
 
     def open_output_dir(self) -> None:
         """Открывает выходную папку в Проводнике Windows."""
-        out_dir = Path(self.output_dir_var.get())
-        if out_dir.exists():
+        out_dir = self.output_dir_var.get()
+        if "Введите путь" in out_dir:
+            self.log_queue.put(("log", "Ошибка: Путь вывода не настроен.", "error"))
+            return
+            
+        path = Path(out_dir)
+        if path.exists():
             import os
-            os.startfile(out_dir)
+            os.startfile(path)
         else:
-            # Отправляем сообщение в лог, используя очередь
-            self.log_queue.put(("log", f"Папка вывода не существует: {out_dir}", "warning"))
+            self.log_queue.put(("log", f"Папка вывода не существует: {path}", "warning"))
 
     def update_log_queue(self) -> None:
         """Периодически опрашивает очередь и безопасно обновляет виджеты в главном потоке."""
@@ -315,8 +544,22 @@ class DicomSplitterApp(ctk.CTk):
             self.percent_label.configure(text="Остановка процесса...")
             return
 
-        input_dir = Path(self.input_dir_var.get())
-        output_dir = Path(self.output_dir_var.get())
+        input_raw = self.input_dir_var.get()
+        output_raw = self.output_dir_var.get()
+
+        if "Введите путь" in input_raw or "Введите путь" in output_raw:
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            self.log_textbox.configure(state="normal")
+            self.log_textbox.insert(
+                "end", 
+                f"[{timestamp}] Ошибка: Перед запуском оптимизации необходимо указать пути к папкам ввода и вывода.\n", 
+                "error"
+            )
+            self.log_textbox.configure(state="disabled")
+            return
+
+        input_dir = Path(input_raw)
+        output_dir = Path(output_raw)
 
         if not input_dir.exists():
             timestamp = datetime.now().strftime("%H:%M:%S")
