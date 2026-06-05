@@ -7,3 +7,12 @@ dicom_input/
 dicom_output/
 .idea/
 .vscode/
+
+# PyInstaller build outputs
+build/
+dist/
+*.exe
+
+# Problem cases data
+problem case/
+problem_case/
