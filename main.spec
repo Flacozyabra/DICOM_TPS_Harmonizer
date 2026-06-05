@@ -13,8 +13,9 @@ datas.extend(tmp_ret[0])
 binaries.extend(tmp_ret[1])
 hiddenimports.extend(tmp_ret[2])
 
-# Добавление папки themes в корень исполняемого файла
+# Добавление папок themes и locales в корень исполняемого файла
 datas.append(('themes', 'themes'))
+datas.append(('locales', 'locales'))
 
 a = Analysis(
     ['main.py'],
