@@ -1,5 +1,6 @@
 from datetime import datetime
 import queue
+import sys
 import threading
 from pathlib import Path
 from tkinter import filedialog
@@ -23,8 +24,11 @@ class DicomSplitterApp(ctk.CTk):
         
         self.title("DICOM TPS Harmonizer")
         
-        # Определение путей к ресурсам относительно корня проекта
-        project_root = Path(__file__).resolve().parents[2]
+        # Определение путей к ресурсам относительно корня проекта с поддержкой PyInstaller
+        if getattr(sys, "frozen", False):
+            project_root = Path(sys._MEIPASS)
+        else:
+            project_root = Path(__file__).resolve().parents[2]
         theme_path = project_root / "themes" / "deep_dark.json"
         icon_path = project_root / "themes" / "app_icon.ico"
         

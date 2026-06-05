@@ -16,8 +16,11 @@
   `Dicom_output / <Имя_Пациента>_<ID_Пациента> / <Модальность_Описание_Серии> / slice_XXXX.dcm`
 * **Современный GUI:** Интерфейс на базе `CustomTkinter` с темной темой, прогресс-баром и интерактивным цветовым логированием операций в реальном времени.
 
-### Быстрый запуск (Windows)
-Просто запустите файл [run.bat](file:///c:/Users/Falco/Desktop/Dicom%20splitter/run.bat) в корневой папке проекта. Он автоматически активирует виртуальное окружение и запустит программу.
+### Использование готовой сборки
+Вы можете скачать уже собранный исполняемый файл `.exe` для Windows из раздела [Releases](https://github.com/Flacozyabra/DICOM_TPS_Harmonizer/releases) на GitHub. Он не требует установки Python или каких-либо зависимостей.
+
+### Быстрый запуск из исходников (Windows)
+Просто запустите файл [run.bat](run.bat) в корневой папке проекта. Он автоматически активирует виртуальное окружение и запустит программу.
 
 ### Установка вручную
 1. Создайте виртуальное окружение: `python -m venv .venv`
@@ -39,8 +42,11 @@
   `Dicom_output / <PatientName>_<PatientID> / <Modality_SeriesDescription> / slice_XXXX.dcm`
 * **Modern GUI:** Powered by `CustomTkinter` with a dark theme, real-time progress bar, and color-coded operation logs.
 
-### Quick Start (Windows)
-Double-click [run.bat](file:///c:/Users/Falco/Desktop/Dicom%20splitter/run.bat) in the project folder. It will configure the virtual environment and start the application automatically.
+### Using pre-built binaries
+You can download the compiled standalone `.exe` for Windows from the [Releases](https://github.com/Flacozyabra/DICOM_TPS_Harmonizer/releases) section. No Python installation or manual dependencies configuration is required.
+
+### Quick Start from source (Windows)
+Double-click [run.bat](run.bat) in the project folder. It will configure the virtual environment and start the application automatically.
 
 ### Manual Installation
 1. Create virtual environment: `python -m venv .venv`
