@@ -792,7 +792,7 @@ class DicomSplitterApp(ctk.CTk):
             hover_color="#dc2626"
         )
         
-        self.percent_label.configure(text="Запуск (0%)")
+        self.percent_label.configure(text=self.loc("processing", 0))
         self.progress_bar.set(0)
         self.log_textbox.configure(state="normal")
         self.log_textbox.delete("1.0", "end")
@@ -809,7 +809,7 @@ class DicomSplitterApp(ctk.CTk):
         )
 
         logger = QueueLogger(self.log_queue)
-        processor = DicomProcessor(input_dir, output_dir, config, logger, self.stop_event)
+        processor = DicomProcessor(input_dir, output_dir, config, logger, self.stop_event, lang=self.current_lang)
 
         # Запускаем обработку в фоновом потоке
         threading.Thread(

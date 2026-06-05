@@ -1,5 +1,7 @@
 from datetime import datetime
+import json
 from pathlib import Path
+import sys
 import threading
 import traceback
 from typing import Dict, List, Set, Union
@@ -37,7 +39,8 @@ class DicomProcessor:
         output_dir: Union[str, Path],
         config: ProcessingConfig,
         logger: BaseLogger,
-        stop_event: threading.Event
+        stop_event: threading.Event,
+        lang: str = "ru"
     ) -> None:
         """Инициализация процессора.
 
@@ -47,33 +50,62 @@ class DicomProcessor:
             config: Объект с параметрами оптимизации.
             logger: Объект логгера для вывода сообщений.
             stop_event: Флаг принудительной остановки выполнения.
+            lang: Язык логирования ("ru" или "en").
         """
         self.input_dir = Path(input_dir)
         self.output_dir = Path(output_dir)
         self.config = config
         self.logger = logger
         self.stop_event = stop_event
+        self.lang = lang
+        self.translations = self._load_translations(lang)
+
+    def _load_translations(self, lang: str) -> Dict[str, str]:
+        """Загружает файл локализации для процессора."""
+        if getattr(sys, "frozen", False):
+            locales_dir = Path(sys._MEIPASS) / "locales"
+        else:
+            locales_dir = Path(__file__).resolve().parents[2] / "locales"
+            
+        locale_file = locales_dir / f"{lang}.json"
+        if locale_file.exists():
+            try:
+                with open(locale_file, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return {}
+
+    def loc(self, key: str, *args) -> str:
+        """Возвращает строку перевода по ключу."""
+        val = self.translations.get(key, key)
+        if args:
+            try:
+                return val.format(*args)
+            except Exception:
+                pass
+        return val
 
     def process(self) -> None:
         """Запускает процесс обработки DICOM файлов."""
-        self.logger.log("=== НАЧАЛО ОБРАБОТКИ DICOM ===")
-        self.logger.log(f"Папка ввода: {self.input_dir}")
-        self.logger.log(f"Папка вывода: {self.output_dir}")
+        self.logger.log(self.loc("log_start"))
+        self.logger.log(self.loc("log_input_dir", self.input_dir))
+        self.logger.log(self.loc("log_output_dir", self.output_dir))
 
-        self.logger.log("Настройки:")
-        self.logger.log(f" - Генерировать новые UID: {self.config.new_uids}")
-        self.logger.log(f" - Разделять мультифреймы: {self.config.split_multiframe}")
-        self.logger.log(f" - Очищать приватные теги: {self.config.clean_tags}")
-        self.logger.log(f" - Заполнять теги по умолчанию: {self.config.default_tags}")
-        self.logger.log(f" - Вывод в Explicit VR Little Endian: {self.config.explicit_vr}")
-        self.logger.log(f" - Исключать отчеты/протоколы/топограммы: {self.config.exclude_reports}")
+        self.logger.log(self.loc("log_settings"))
+        self.logger.log(self.loc("log_setting_uids", self.config.new_uids))
+        self.logger.log(self.loc("log_setting_split", self.config.split_multiframe))
+        self.logger.log(self.loc("log_setting_clean", self.config.clean_tags))
+        self.logger.log(self.loc("log_setting_default", self.config.default_tags))
+        self.logger.log(self.loc("log_setting_explicit", self.config.explicit_vr))
+        self.logger.log(self.loc("log_setting_exclude", self.config.exclude_reports))
 
         try:
             if not self.input_dir.exists():
-                self.logger.log(f"Ошибка: Входная папка не существует: {self.input_dir}", "error")
+                self.logger.log(self.loc("error_input_not_exist", self.input_dir), "error")
                 return
 
-            self.logger.log("Поиск DICOM-файлов...")
+            self.logger.log(self.loc("log_search_files"))
             all_files: List[Path] = []
             
             for file_path in self.input_dir.rglob("*"):
@@ -83,10 +115,10 @@ class DicomProcessor:
 
             total_files = len(all_files)
             if total_files == 0:
-                self.logger.log(f"В папке {self.input_dir} файлы DICOM не найдены.", "warning")
+                self.logger.log(self.loc("log_files_not_found", self.input_dir), "warning")
                 return
 
-            self.logger.log(f"Найдено файлов для анализа: {total_files}")
+            self.logger.log(self.loc("log_files_found", total_files))
 
             # Словари для маппинга UID (сохранение целостности связей)
             study_uid_map: Dict[str, str] = {}
@@ -104,7 +136,7 @@ class DicomProcessor:
 
             for file_path in all_files:
                 if self.stop_event.is_set():
-                    self.logger.log("=== ОБРАБОТКА ОСТАНОВЛЕНА ПОЛЬЗОВАТЕЛЕМ ===", "warning")
+                    self.logger.log(self.loc("log_stop_user"), "warning")
                     break
 
                 filename = file_path.name
@@ -112,19 +144,17 @@ class DicomProcessor:
                     # Двухэтапное чтение: сначала без пикселей для быстрой фильтрации
                     ds = safe_dcmread(file_path, stop_before_pixels=True)
                 except ValueError as e:
-                    self.logger.log(f"Не-DICOM или поврежденный файл {filename}: {e}", "warning")
+                    self.logger.log(self.loc("log_non_dicom", filename, e), "warning")
                     non_dicom_count += 1
                     processed_count += 1
                     self.logger.update_progress(processed_count, total_files)
                     continue
                 except Exception as e:
-                    self.logger.log(f"Не удалось прочитать файл {filename}: {e}", "error")
+                    self.logger.log(self.loc("log_read_error", filename, e), "error")
                     error_count += 1
                     processed_count += 1
                     self.logger.update_progress(processed_count, total_files)
                     continue
-
-
 
                 # Читаем основные теги
                 patient_name = make_safe_filename(getattr(ds, 'PatientName', 'UNKNOWN'))
@@ -143,7 +173,7 @@ class DicomProcessor:
                     }
                     is_excluded = any(kw in series_desc_lower for kw in exclude_keywords) or modality in ('SR', 'PR')
                     if is_excluded:
-                        self.logger.log(f"Пропущена служебная серия: {series_desc} ({modality})")
+                        self.logger.log(self.loc("log_skip_service", series_desc, modality))
                         excluded_count += 1
                         processed_count += 1
                         self.logger.update_progress(processed_count, total_files)
@@ -190,7 +220,7 @@ class DicomProcessor:
 
                     pixel_array = ds_full.pixel_array
                 except Exception as e:
-                    self.logger.log(f"Ошибка декодирования пикселей в {filename}: {e}", "error")
+                    self.logger.log(self.loc("log_pixel_error", filename, e), "error")
                     self.logger.log(traceback.format_exc(), "error")
                     error_count += 1
                     processed_count += 1
@@ -201,7 +231,7 @@ class DicomProcessor:
 
                 if is_multiframe and self.config.split_multiframe:
                     n_frames = int(ds_full.NumberOfFrames)
-                    self.logger.log(f"Мультифрейм: {filename} ({n_frames} кадров) -> разделение...")
+                    self.logger.log(self.loc("log_split_multiframe", filename, n_frames))
 
                     shared_info = ds_full.SharedFunctionalGroupsSequence[0] if hasattr(ds_full, 'SharedFunctionalGroupsSequence') else None
                     
@@ -242,25 +272,23 @@ class DicomProcessor:
                             save_dicom_file(out_path, cleaned_ds, self.config.explicit_vr)
                             success_count += 1
                         except Exception as e:
-                            self.logger.log(f"Ошибка сохранения кадра {i+1} из файла {filename}: {e}", "error")
+                            self.logger.log(self.loc("log_frame_save_error", i + 1, filename, e), "error")
                             self.logger.log(traceback.format_exc(), "error")
                             multiframe_errors += 1
                             error_count += 1
 
                     if self.stop_event.is_set():
-                        self.logger.log("=== ОБРАБОТКА ОСТАНОВЛЕНА ПОЛЬЗОВАТЕЛЕМ ===", "warning")
+                        self.logger.log(self.loc("log_stop_user"), "warning")
                         break
 
                     if multiframe_errors == 0:
                         self.logger.log(
-                            f"[{modality}] {patient_name} ({patient_id}) | "
-                            f"{series_folder} | {filename} -> разделен на {n_frames} срезов", 
+                            self.loc("log_split_success", modality, patient_name, patient_id, series_folder, filename, n_frames),
                             "success"
                         )
                     else:
                         self.logger.log(
-                            f"[{modality}] {patient_name} ({patient_id}) | "
-                            f"{series_folder} | {filename} -> разделен с {multiframe_errors} ошибками", 
+                            self.loc("log_split_warning", modality, patient_name, patient_id, series_folder, filename, multiframe_errors),
                             "warning"
                         )
 
@@ -303,12 +331,11 @@ class DicomProcessor:
                         out_path = dest_dir / f"slice_{current_instance:04d}.dcm"
                         save_dicom_file(out_path, cleaned_ds, self.config.explicit_vr)
                         self.logger.log(
-                            f"[{modality}] {patient_name} ({patient_id}) | "
-                            f"{series_folder} | {filename} -> slice_{current_instance:04d}.dcm"
+                            self.loc("log_save_slice", modality, patient_name, patient_id, series_folder, filename, current_instance)
                         )
                         success_count += 1
                     except Exception as e:
-                        self.logger.log(f"Ошибка сохранения файла {filename}: {e}", "error")
+                        self.logger.log(self.loc("log_save_error", filename, e), "error")
                         self.logger.log(traceback.format_exc(), "error")
                         error_count += 1
 
@@ -318,26 +345,26 @@ class DicomProcessor:
             end_time = datetime.now()
             duration = (end_time - start_time).total_seconds()
 
-            self.logger.log("=" * 70)
-            self.logger.log("ОТЧЕТ О ВЫПОЛНЕНИИ ОПЕРАЦИИ:")
-            self.logger.log(f" - Найдено исходных файлов: {total_files}")
-            self.logger.log(f" - Из них не-DICOM файлов: {non_dicom_count}")
-            self.logger.log(f" - Пропущено файлов без пикселей: {no_pixel_count}")
-            self.logger.log(f" - Исключено файлов служебных серий: {excluded_count}")
-            self.logger.log(f" - Успешно сохранено срезов: {success_count}")
-            self.logger.log(f" - Ошибок при обработке: {error_count}")
-            self.logger.log(f" - Время выполнения: {duration:.1f} сек.")
-            self.logger.log("=" * 70)
+            self.logger.log(self.loc("log_report_separator"))
+            self.logger.log(self.loc("log_report_title"))
+            self.logger.log(self.loc("log_report_found", total_files))
+            self.logger.log(self.loc("log_report_non_dicom", non_dicom_count))
+            self.logger.log(self.loc("log_report_no_pixels", no_pixel_count))
+            self.logger.log(self.loc("log_report_excluded", excluded_count))
+            self.logger.log(self.loc("log_report_saved", success_count))
+            self.logger.log(self.loc("log_report_errors", error_count))
+            self.logger.log(self.loc("log_report_duration", duration))
+            self.logger.log(self.loc("log_report_separator"))
 
             if success_count > 0 and error_count == 0:
-                self.logger.log("=== ОБРАБОТКА ЗАВЕРШЕНА УСПЕШНО ===", "success")
+                self.logger.log(self.loc("log_finished_success"), "success")
             elif success_count > 0 and error_count > 0:
-                self.logger.log("=== ОБРАБОТКА ЗАВЕРШЕНА С ОШИБКАМИ ===", "warning")
+                self.logger.log(self.loc("log_finished_warning"), "warning")
             else:
-                self.logger.log("=== ОБРАБОТКА ЗАВЕРШИЛАСЬ НЕУДАЧЕЙ ===", "error")
+                self.logger.log(self.loc("log_finished_error"), "error")
 
         except Exception as ex:
-            self.logger.log(f"Критическая ошибка при обработке: {ex}", "error")
+            self.logger.log(self.loc("log_critical_error", ex), "error")
             self.logger.log(traceback.format_exc(), "error")
         finally:
             # Уведомляем вызывающий код о завершении, передавая финальный прогресс
