@@ -35,12 +35,12 @@ class LanguageSwitch(ctk.CTkFrame):
 
         self.bind("<Button-1>", self.toggle)
 
-        self.lbl_ru = ctk.CTkLabel(self, text="", image=self.img_ru)
-        self.lbl_ru.place(x=10, y=8)
+        self.lbl_ru = ctk.CTkLabel(self, text="", image=self.img_ru, width=24, height=16)
+        self.lbl_ru.place(x=9, y=7)
         self.lbl_ru.bind("<Button-1>", self.toggle)
 
-        self.lbl_gb = ctk.CTkLabel(self, text="", image=self.img_gb)
-        self.lbl_gb.place(x=42, y=8)
+        self.lbl_gb = ctk.CTkLabel(self, text="", image=self.img_gb, width=24, height=16)
+        self.lbl_gb.place(x=43, y=7)
         self.lbl_gb.bind("<Button-1>", self.toggle)
 
         self.slider = ctk.CTkFrame(
@@ -53,25 +53,25 @@ class LanguageSwitch(ctk.CTkFrame):
         )
         self.slider.bind("<Button-1>", self.toggle)
         
-        self.slider_img = ctk.CTkLabel(self.slider, text="", image=self.img_ru)
+        self.slider_img = ctk.CTkLabel(self.slider, text="", image=self.img_ru, width=24, height=16)
         self.slider_img.place(x=6, y=4)
         self.slider_img.bind("<Button-1>", self.toggle)
 
         if self.lang == "ru":
-            self.slider.place(x=4, y=3)
+            self.slider.place(x=3, y=3)
             self.slider_img.configure(image=self.img_ru)
         else:
-            self.slider.place(x=36, y=3)
+            self.slider.place(x=37, y=3)
             self.slider_img.configure(image=self.img_gb)
 
     def toggle(self, event=None) -> None:
         if self.lang == "ru":
             self.lang = "en"
-            self.slider.place(x=36, y=3)
+            self.slider.place(x=37, y=3)
             self.slider_img.configure(image=self.img_gb)
         else:
             self.lang = "ru"
-            self.slider.place(x=4, y=3)
+            self.slider.place(x=3, y=3)
             self.slider_img.configure(image=self.img_ru)
         
         if self.command:
