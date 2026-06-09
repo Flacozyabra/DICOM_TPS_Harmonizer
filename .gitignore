@@ -16,3 +16,6 @@ dist/
 # Problem cases data
 problem case/
 problem_case/
+
+# Gemini workspace files
+.gemini/
