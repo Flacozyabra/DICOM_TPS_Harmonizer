@@ -73,5 +73,16 @@
     "log_finished_success": "=== PROCESSING COMPLETED SUCCESSFULLY ===",
     "log_finished_warning": "=== PROCESSING COMPLETED WITH ERRORS ===",
     "log_finished_error": "=== PROCESSING FAILED ===",
-    "log_critical_error": "Critical error during processing: {}"
+    "log_critical_error": "Critical error during processing: {}",
+    "split_series": "Split mixed series (geometrically)",
+    "log_setting_split_series": " - Split geometric series: {}",
+    "patient_explorer": "Patient Explorer",
+    "scan_input": "Scan",
+    "tree_loading": "Scanning...",
+    "tree_empty": "No patients found.",
+    "dialog_patient_info": "Patient Info Verification",
+    "dialog_patient_message": "Empty or invalid Patient Name/ID detected. Please correct them:",
+    "dialog_save": "Save & Continue",
+    "dialog_pat_name": "Patient Name:",
+    "dialog_pat_id": "Patient ID:"
 }

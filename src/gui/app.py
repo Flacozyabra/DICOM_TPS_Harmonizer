@@ -137,6 +137,167 @@ class CustomQuestionDialog(ctk.CTkToplevel):
         self.destroy()
 
 
+
+class TreeNode:
+    def __init__(self, level: int, label: str, key: Any, files: list = None, parent=None):
+        self.level = level  # 0: patient, 1: study, 2: series
+        self.label = label
+        self.key = key
+        self.files = files or []
+        self.parent = parent
+        self.children = []
+        self.checkbox = None
+        self.var = None  # ctk.BooleanVar
+
+
+class CTkPatientTree(ctk.CTkScrollableFrame):
+    def __init__(self, master, on_selection_change=None, **kwargs):
+        super().__init__(master, **kwargs)
+        self.on_selection_change = on_selection_change
+        self.all_nodes = []
+        
+    def clear(self):
+        for widget in self.winfo_children():
+            widget.destroy()
+        self.all_nodes = []
+
+    def populate(self, tree_data: dict):
+        self.clear()
+        
+        for (pat_name, pat_id), studies in sorted(tree_data.items(), key=lambda x: str(x[0])):
+            # Create Patient Node
+            pat_label = f"{pat_name} [{pat_id}]"
+            pat_node = TreeNode(0, pat_label, (pat_name, pat_id))
+            self.all_nodes.append(pat_node)
+            
+            for (study_date, study_desc, study_uid), series_dict in sorted(studies.items(), key=lambda x: str(x[0])):
+                # Create Study Node
+                study_label = f"{study_date} - {study_desc}" if study_date else study_desc
+                study_node = TreeNode(1, study_label, study_uid, parent=pat_node)
+                pat_node.children.append(study_node)
+                self.all_nodes.append(study_node)
+                
+                for (series_label, s_uid, seg_idx), files in sorted(series_dict.items(), key=lambda x: str(x[0])):
+                    # Create Series Node
+                    series_node = TreeNode(2, series_label, (s_uid, seg_idx), files=files, parent=study_node)
+                    study_node.children.append(series_node)
+                    self.all_nodes.append(series_node)
+
+        # Render widgets
+        for node in self.all_nodes:
+            node.var = ctk.BooleanVar(value=True)
+            
+            padx = 5
+            if node.level == 1:
+                padx = (25, 5)
+            elif node.level == 2:
+                padx = (45, 5)
+                
+            cb = ctk.CTkCheckBox(
+                self,
+                text=node.label,
+                variable=node.var,
+                command=lambda n=node: self.on_node_toggle(n),
+                font=ctk.CTkFont(size=11 + (2 - node.level))
+            )
+            cb.pack(anchor="w", padx=padx, pady=3, fill="x")
+            node.checkbox = cb
+
+    def on_node_toggle(self, node: TreeNode):
+        state = node.var.get()
+        self._set_children_state(node, state)
+        self._update_parent_states(node)
+        
+        if self.on_selection_change:
+            self.on_selection_change()
+
+    def _set_children_state(self, node: TreeNode, state: bool):
+        for child in node.children:
+            child.var.set(state)
+            self._set_children_state(child, state)
+
+    def _update_parent_states(self, node: TreeNode):
+        parent = node.parent
+        if parent:
+            any_checked = any(c.var.get() for c in parent.children)
+            parent.var.set(any_checked)
+            self._update_parent_states(parent)
+
+    def get_selected_files(self) -> list:
+        selected_files = []
+        for node in self.all_nodes:
+            if node.level == 2 and node.var.get():
+                selected_files.extend(node.files)
+        return selected_files
+
+    def get_patient_nodes(self) -> list:
+        return [node for node in self.all_nodes if node.level == 0]
+
+
+class PatientEditDialog(ctk.CTkToplevel):
+    def __init__(self, parent: ctk.CTk, current_name: str, current_id: str) -> None:
+        super().__init__(parent)
+        self.title(parent.loc("dialog_patient_info"))
+        self.geometry("420x250")
+        self.resizable(False, False)
+        
+        self.transient(parent)
+        self.grab_set()
+        
+        parent.update_idletasks()
+        x = parent.winfo_x() + (parent.winfo_width() - 420) // 2
+        y = parent.winfo_y() + (parent.winfo_height() - 250) // 2
+        self.geometry(f"+{x}+{y}")
+        
+        self.new_name = current_name
+        self.new_id = current_id
+        self.cancelled = False
+        
+        lbl_msg = ctk.CTkLabel(
+            self,
+            text=parent.loc("dialog_patient_message"),
+            wraplength=380,
+            justify="left",
+            font=ctk.CTkFont(size=12)
+        )
+        lbl_msg.pack(pady=(15, 15), padx=20)
+        
+        fields_frame = ctk.CTkFrame(self, fg_color="transparent")
+        fields_frame.pack(fill="x", padx=20, pady=5)
+        
+        lbl_name = ctk.CTkLabel(fields_frame, text=parent.loc("dialog_pat_name"), width=100, anchor="w")
+        lbl_name.grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        self.ent_name = ctk.CTkEntry(fields_frame, width=260)
+        self.ent_name.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+        self.ent_name.insert(0, current_name)
+        
+        lbl_id = ctk.CTkLabel(fields_frame, text=parent.loc("dialog_pat_id"), width=100, anchor="w")
+        lbl_id.grid(row=1, column=0, padx=5, pady=5, sticky="w")
+        self.ent_id = ctk.CTkEntry(fields_frame, width=260)
+        self.ent_id.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
+        self.ent_id.insert(0, current_id)
+        
+        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
+        btn_frame.pack(fill="x", padx=20, pady=(20, 10))
+        
+        btn_save = ctk.CTkButton(btn_frame, text=parent.loc("dialog_save"), command=self.on_save)
+        btn_save.pack(side="left", padx=10, expand=True)
+        
+        btn_skip = ctk.CTkButton(btn_frame, text=parent.loc("no"), fg_color="gray", hover_color="darkgray", command=self.on_skip)
+        btn_skip.pack(side="left", padx=10, expand=True)
+        
+        self.wait_window()
+        
+    def on_save(self) -> None:
+        self.new_name = self.ent_name.get().strip()
+        self.new_id = self.ent_id.get().strip()
+        self.destroy()
+        
+    def on_skip(self) -> None:
+        self.cancelled = True
+        self.destroy()
+
+
 class DicomSplitterApp(ctk.CTk):
     """Главный класс графического интерфейса приложения DICOM TPS Harmonizer."""
 
@@ -164,8 +325,8 @@ class DicomSplitterApp(ctk.CTk):
             except Exception:
                 pass
 
-        width, height = 900, 720
-        self.minimum_width = 800
+        width, height = 1100, 720
+        self.minimum_width = 1000
         self.minimum_height = 620
         self.minsize(self.minimum_width, self.minimum_height)
         
@@ -204,6 +365,7 @@ class DicomSplitterApp(ctk.CTk):
         self.default_tags_var = ctk.BooleanVar(value=True)
         self.explicit_vr_var = ctk.BooleanVar(value=True)
         self.exclude_reports_var = ctk.BooleanVar(value=True)
+        self.split_series_var = ctk.BooleanVar(value=True)
 
         self.is_processing = False
         self.stop_event = threading.Event()
@@ -351,6 +513,14 @@ class DicomSplitterApp(ctk.CTk):
             self.cb_explicit_vr.configure(text=self.loc("write_explicit"))
         if hasattr(self, "cb_exclude_reports"):
             self.cb_exclude_reports.configure(text=self.loc("exclude_reports"))
+        if hasattr(self, "cb_split_series"):
+            self.cb_split_series.configure(text=self.loc("split_series"))
+        if hasattr(self, "sidebar_title"):
+            self.sidebar_title.configure(text=self.loc("patient_explorer"))
+        if hasattr(self, "scan_btn") and self.scan_btn.cget("text") not in [self.loc("tree_loading"), "Scanning..."]:
+            self.scan_btn.configure(text=self.loc("scan_input"))
+        if hasattr(self, "selection_label"):
+            self.on_tree_selection_change()
         if hasattr(self, "log_title"):
             self.log_title.configure(text=self.loc("log_title"))
             
@@ -426,9 +596,56 @@ class DicomSplitterApp(ctk.CTk):
 
     def create_widgets(self) -> None:
         """Инициализирует и позиционирует все виджеты на форме."""
-        # Конфигурация сетки главного окна
-        self.grid_rowconfigure(3, weight=1)  # Текстовое окно лога растягивается по вертикали
-        self.grid_columnconfigure(0, weight=1)
+        # Главный макет: 2 колонки (Проводник слева, настройки/логи справа)
+        self.grid_rowconfigure(0, weight=1)
+        self.grid_columnconfigure(0, weight=0, minsize=320)
+        self.grid_columnconfigure(1, weight=1)
+
+        # 1. Левая боковая панель (Проводник пациентов)
+        self.sidebar_frame = ctk.CTkFrame(self, width=320, corner_radius=0)
+        self.sidebar_frame.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
+        self.sidebar_frame.grid_rowconfigure(1, weight=1)
+        self.sidebar_frame.grid_columnconfigure(0, weight=1)
+
+        # Заголовок проводника
+        self.sidebar_title = ctk.CTkLabel(
+            self.sidebar_frame,
+            text=self.loc("patient_explorer"),
+            font=ctk.CTkFont(family="Segoe UI", size=18, weight="bold")
+        )
+        self.sidebar_title.grid(row=0, column=0, padx=15, pady=(15, 5), sticky="w")
+
+        # Кнопка сканирования
+        self.scan_btn = ctk.CTkButton(
+            self.sidebar_frame,
+            text=self.loc("scan_input"),
+            font=ctk.CTkFont(weight="bold"),
+            width=90,
+            command=self.run_input_scan
+        )
+        self.scan_btn.grid(row=0, column=0, padx=15, pady=(15, 5), sticky="e")
+
+        # Дерево пациентов
+        self.tree_view = CTkPatientTree(
+            self.sidebar_frame,
+            on_selection_change=self.on_tree_selection_change,
+            fg_color=("#F3F4F6", "#1F1F1F")
+        )
+        self.tree_view.grid(row=1, column=0, padx=15, pady=10, sticky="nsew")
+
+        # Метка статуса выбора
+        self.selection_label = ctk.CTkLabel(
+            self.sidebar_frame,
+            text=f"{self.loc('selected_for_processing')}: 0",
+            font=ctk.CTkFont(size=11, weight="bold")
+        )
+        self.selection_label.grid(row=2, column=0, padx=15, pady=(0, 15), sticky="w")
+
+        # 2. Правая основная панель (контейнер для существующих элементов)
+        self.main_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.main_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
+        self.main_frame.grid_rowconfigure(3, weight=1)  # Лог-бокс растягивается
+        self.main_frame.grid_columnconfigure(0, weight=1)
         
         # Загрузка иконок для кнопок и переключателя
         if getattr(sys, "frozen", False):
@@ -450,7 +667,7 @@ class DicomSplitterApp(ctk.CTk):
 
         # 1. Заголовок и свитч
         self.title_label = ctk.CTkLabel(
-            self, 
+            self.main_frame, 
             text=self.loc("title"), 
             font=ctk.CTkFont(family="Segoe UI", size=24, weight="bold")
         )
@@ -458,7 +675,7 @@ class DicomSplitterApp(ctk.CTk):
         
         if self.img_ru and self.img_gb:
             self.lang_switch = LanguageSwitch(
-                self,
+                self.main_frame,
                 ru_image=self.img_ru,
                 gb_image=self.img_gb,
                 command=self.change_language,
@@ -467,7 +684,7 @@ class DicomSplitterApp(ctk.CTk):
             self.lang_switch.grid(row=0, column=0, padx=20, pady=(20, 10), sticky="e")
         
         # 2. Выбор папок
-        folder_frame = ctk.CTkFrame(self)
+        folder_frame = ctk.CTkFrame(self.main_frame)
         folder_frame.grid(row=1, column=0, padx=20, pady=10, sticky="nsew")
         
         folder_frame.grid_columnconfigure(0, weight=0)
@@ -545,7 +762,7 @@ class DicomSplitterApp(ctk.CTk):
         self.output_browse_btn.grid(row=1, column=4, padx=(0, 10), pady=(0, 10))
 
         # 3. Настройки (Чекбоксы)
-        settings_frame = ctk.CTkFrame(self)
+        settings_frame = ctk.CTkFrame(self.main_frame)
         settings_frame.grid(row=2, column=0, padx=20, pady=10, sticky="nsew")
         settings_frame.grid_columnconfigure((0, 1), weight=1)
         
@@ -585,17 +802,24 @@ class DicomSplitterApp(ctk.CTk):
             text=self.loc("write_explicit"), 
             variable=self.explicit_vr_var
         )
-        self.cb_explicit_vr.grid(row=3, column=0, padx=15, pady=(5, 10), sticky="w")
+        self.cb_explicit_vr.grid(row=3, column=0, padx=15, pady=5, sticky="w")
 
         self.cb_exclude_reports = ctk.CTkCheckBox(
             settings_frame, 
             text=self.loc("exclude_reports"), 
             variable=self.exclude_reports_var
         )
-        self.cb_exclude_reports.grid(row=3, column=1, padx=15, pady=(5, 10), sticky="w")
+        self.cb_exclude_reports.grid(row=3, column=1, padx=15, pady=5, sticky="w")
+
+        self.cb_split_series = ctk.CTkCheckBox(
+            settings_frame, 
+            text=self.loc("split_series"), 
+            variable=self.split_series_var
+        )
+        self.cb_split_series.grid(row=4, column=0, padx=15, pady=(5, 10), sticky="w")
 
         # 4. Поле для вывода логов
-        log_frame = ctk.CTkFrame(self)
+        log_frame = ctk.CTkFrame(self.main_frame)
         log_frame.grid(row=3, column=0, padx=20, pady=10, sticky="nsew")
         log_frame.grid_rowconfigure(1, weight=1)
         log_frame.grid_columnconfigure(0, weight=1)
@@ -613,7 +837,7 @@ class DicomSplitterApp(ctk.CTk):
         self.log_textbox.tag_config("success", foreground="#77dd77")
 
         # 5. Управление и прогресс
-        control_frame = ctk.CTkFrame(self)
+        control_frame = ctk.CTkFrame(self.main_frame)
         control_frame.grid(row=4, column=0, padx=20, pady=(0, 20), sticky="nsew")
         
         control_frame.grid_columnconfigure(0, weight=1)
@@ -735,6 +959,12 @@ class DicomSplitterApp(ctk.CTk):
                         self.percent_label.configure(text=self.loc("finished"))
                     self.set_gui_state(True)
                     
+                elif msg_type == "tree_scanned":
+                    _, tree_data = msg
+                    self.tree_view.populate(tree_data)
+                    self.scan_btn.configure(state="normal", text=self.loc("scan_input"))
+                    self.on_tree_selection_change()
+
                 self.log_queue.task_done()
         except queue.Empty:
             pass
@@ -783,6 +1013,51 @@ class DicomSplitterApp(ctk.CTk):
             self.log_textbox.configure(state="disabled")
             return
 
+        # Получаем выбранные файлы из дерева или авто-сканируем
+        selected_files = self.get_selected_files_or_autoscan()
+        if not selected_files:
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            self.log_textbox.configure(state="normal")
+            self.log_textbox.insert(
+                "end", 
+                f"[{timestamp}] {self.loc('tree_empty')}\n", 
+                "error"
+            )
+            self.log_textbox.configure(state="disabled")
+            return
+
+        # Интерактивная валидация данных пациента (Identity Compliance)
+        patient_overrides = {}
+        patient_nodes = self.tree_view.get_patient_nodes()
+        for p_node in patient_nodes:
+            any_selected = False
+            for study_node in p_node.children:
+                for series_node in study_node.children:
+                    if series_node.var.get():
+                        any_selected = True
+                        break
+            if not any_selected:
+                continue
+
+            pat_name, pat_id = p_node.key
+            is_valid = True
+            if not pat_name or pat_name.strip() == "" or pat_name.upper() == "UNKNOWN":
+                is_valid = False
+            if not pat_id or pat_id.strip() == "" or pat_id.upper() == "UNKNOWN":
+                is_valid = False
+            if len(pat_name) > 64 or len(pat_id) > 64:
+                is_valid = False
+
+            if not is_valid:
+                dialog = PatientEditDialog(self, pat_name, pat_id)
+                if dialog.cancelled:
+                    pass
+                else:
+                    new_name = dialog.new_name.strip()
+                    new_id = dialog.new_id.strip()
+                    if new_name and new_id:
+                        patient_overrides[(pat_name, pat_id)] = (new_name, new_id)
+
         self.is_processing = True
         self.stop_event.clear()
         
@@ -805,11 +1080,16 @@ class DicomSplitterApp(ctk.CTk):
             clean_tags=self.clean_tags_var.get(),
             default_tags=self.default_tags_var.get(),
             explicit_vr=self.explicit_vr_var.get(),
-            exclude_reports=self.exclude_reports_var.get()
+            exclude_reports=self.exclude_reports_var.get(),
+            split_series=self.split_series_var.get()
         )
 
         logger = QueueLogger(self.log_queue)
-        processor = DicomProcessor(input_dir, output_dir, config, logger, self.stop_event, lang=self.current_lang)
+        processor = DicomProcessor(
+            input_dir, output_dir, config, logger, self.stop_event, 
+            lang=self.current_lang, selected_files=selected_files,
+            patient_overrides=patient_overrides
+        )
 
         # Запускаем обработку в фоновом потоке
         threading.Thread(
@@ -823,5 +1103,66 @@ class DicomSplitterApp(ctk.CTk):
         try:
             processor.process()
         finally:
-            # Уведомляем GUI о завершении работы
             self.log_queue.put(("finished",))
+
+    def on_tree_selection_change(self):
+        selected_files = self.tree_view.get_selected_files()
+        self.selection_label.configure(
+            text=f"{self.loc('selected_for_processing')}: {len(selected_files)}"
+        )
+
+    def run_input_scan(self) -> None:
+        input_path = self.input_dir_var.get()
+        if not input_path or "Введите путь" in input_path or "Enter path" in input_path:
+            return
+
+        path = Path(input_path)
+        if not path.exists():
+            return
+
+        self.scan_btn.configure(state="disabled", text=self.loc("tree_loading"))
+        self.selection_label.configure(text=self.loc("tree_loading"))
+        
+        threading.Thread(target=self._scan_thread, args=(path,), daemon=True).start()
+
+    def _scan_thread(self, path: Path) -> None:
+        temp_config = ProcessingConfig(
+            new_uids=False, split_multiframe=False, clean_tags=False,
+            default_tags=False, explicit_vr=False, exclude_reports=False,
+            split_series=self.split_series_var.get()
+        )
+        logger = QueueLogger(self.log_queue)
+        stop_event = threading.Event()
+        processor = DicomProcessor(path, self.output_dir_var.get(), temp_config, logger, stop_event, lang=self.current_lang)
+        
+        try:
+            tree_data = processor.scan_input_directory()
+            self.log_queue.put(("tree_scanned", tree_data))
+        except Exception as e:
+            self.log_queue.put(("log", f"Error scanning directory: {e}", "error"))
+            self.log_queue.put(("tree_scanned", {}))
+
+    def get_selected_files_or_autoscan(self) -> list:
+        selected_files = self.tree_view.get_selected_files()
+        if not selected_files and not self.tree_view.all_nodes:
+            input_path = self.input_dir_var.get()
+            if not input_path or "Введите путь" in input_path or "Enter path" in input_path:
+                return []
+            path = Path(input_path)
+            if not path.exists():
+                return []
+            
+            temp_config = ProcessingConfig(
+                new_uids=False, split_multiframe=False, clean_tags=False,
+                default_tags=False, explicit_vr=False, exclude_reports=False,
+                split_series=self.split_series_var.get()
+            )
+            logger = QueueLogger(self.log_queue)
+            processor = DicomProcessor(path, self.output_dir_var.get(), temp_config, logger, threading.Event(), lang=self.current_lang)
+            try:
+                tree_data = processor.scan_input_directory()
+                self.tree_view.populate(tree_data)
+                selected_files = self.tree_view.get_selected_files()
+            except Exception:
+                pass
+        return selected_files

@@ -97,6 +97,25 @@ def clean_and_build_dataset(
         if not hasattr(new_ds, 'PatientSex'):
             new_ds.PatientSex = getattr(src_ds, 'PatientSex', 'O')
 
+        # Специальные Type 1 теги для модальности MR (для совместимости с TPS)
+        if getattr(src_ds, 'Modality', None) == 'MR':
+            if not hasattr(new_ds, 'MRAcquisitionType') or not new_ds.MRAcquisitionType:
+                new_ds.MRAcquisitionType = getattr(src_ds, 'MRAcquisitionType', '2D')
+            if not hasattr(new_ds, 'ScanningSequence') or not new_ds.ScanningSequence:
+                new_ds.ScanningSequence = getattr(src_ds, 'ScanningSequence', 'SE')
+            if not hasattr(new_ds, 'SequenceVariant') or not new_ds.SequenceVariant:
+                new_ds.SequenceVariant = getattr(src_ds, 'SequenceVariant', 'NONE')
+            if not hasattr(new_ds, 'ScanOptions') or not new_ds.ScanOptions:
+                new_ds.ScanOptions = getattr(src_ds, 'ScanOptions', 'NONE')
+            if not hasattr(new_ds, 'EchoTime') or new_ds.EchoTime is None or new_ds.EchoTime == "":
+                new_ds.EchoTime = getattr(src_ds, 'EchoTime', 0.0)
+            if not hasattr(new_ds, 'RepetitionTime') or new_ds.RepetitionTime is None or new_ds.RepetitionTime == "":
+                new_ds.RepetitionTime = getattr(src_ds, 'RepetitionTime', 0.0)
+            if not hasattr(new_ds, 'MagneticFieldStrength') or new_ds.MagneticFieldStrength is None or new_ds.MagneticFieldStrength == "":
+                new_ds.MagneticFieldStrength = getattr(src_ds, 'MagneticFieldStrength', 1.5)
+            if not hasattr(new_ds, 'AcquisitionNumber') or new_ds.AcquisitionNumber is None or new_ds.AcquisitionNumber == "":
+                new_ds.AcquisitionNumber = getattr(src_ds, 'AcquisitionNumber', 1)
+
     # Запись пикселей
     if new_ds.PixelRepresentation == 1:
         new_ds.PixelData = pixel_data.astype(np.int16).tobytes()

@@ -13,3 +13,4 @@ class ProcessingConfig:
     default_tags: bool
     explicit_vr: bool
     exclude_reports: bool
+    split_series: bool
