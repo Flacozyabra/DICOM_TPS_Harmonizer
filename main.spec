@@ -1,21 +1,14 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_all
 
 block_cipher = None
 
-# Сбор ассетов и зависимостей для customtkinter
-datas = []
+# Добавление папок themes и locales в корень исполняемого файла
+datas = [
+    ('themes', 'themes'),
+    ('locales', 'locales')
+]
 binaries = []
 hiddenimports = []
-
-tmp_ret = collect_all('customtkinter')
-datas.extend(tmp_ret[0])
-binaries.extend(tmp_ret[1])
-hiddenimports.extend(tmp_ret[2])
-
-# Добавление папок themes и locales в корень исполняемого файла
-datas.append(('themes', 'themes'))
-datas.append(('locales', 'locales'))
 
 a = Analysis(
     ['main.py'],
@@ -41,7 +34,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='DICOM_TPS_Harmonizer',
+    name='DICOM_TPS_Harmonizer_v1.1.0',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

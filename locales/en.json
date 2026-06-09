@@ -1,5 +1,5 @@
 {
-    "title": "DICOM TPS Harmonizer",
+    "title": "DICOM TPS Harmonizer v1.1.0",
     "input_folder": "Input folder:",
     "output_folder": "Output folder:",
     "placeholder_input": "Enter path for Dicom_input folder",
