@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFrame,
     QLabel, QPushButton, QLineEdit, QCheckBox, QProgressBar,
     QTextEdit, QTreeWidget, QTreeWidgetItem, QFileDialog, QDialog,
-    QGridLayout, QMessageBox, QApplication, QSplitter
+    QGridLayout, QMessageBox, QApplication, QSplitter, QSizePolicy
 )
 from PyQt6.QtGui import QIcon, QFont, QTextCursor, QPixmap, QBrush, QColor
 
@@ -638,12 +638,6 @@ class DicomSplitterApp(QMainWindow):
         # Создаем вертикальный разделитель для правой панели
         self.right_splitter = QSplitter(Qt.Orientation.Vertical)
 
-        # Контейнер для верхних блоков (папки и настройки)
-        upper_container = QFrame()
-        upper_layout = QVBoxLayout(upper_container)
-        upper_layout.setContentsMargins(0, 0, 0, 0)
-        upper_layout.setSpacing(12)
-
         # Группа 1: Выбор папок
         folder_frame = QFrame()
         folder_frame.setObjectName("groupFrame")
@@ -708,7 +702,7 @@ class DicomSplitterApp(QMainWindow):
         self.btn_browse_out.setFixedWidth(100)
         folder_layout.addWidget(self.btn_browse_out, 1, 4)
 
-        upper_layout.addWidget(folder_frame)
+
 
         # Группа 2: Настройки оптимизации
         settings_frame = QFrame()
@@ -749,7 +743,7 @@ class DicomSplitterApp(QMainWindow):
         self.cb_split_series.setChecked(True)
         settings_layout.addWidget(self.cb_split_series, 4, 0)
 
-        upper_layout.addWidget(settings_frame)
+
 
         # Группа 3: Лог выполнения
         log_frame = QFrame()
@@ -767,8 +761,9 @@ class DicomSplitterApp(QMainWindow):
         self.log_textbox.setFont(QFont("Consolas", 10))
         log_layout.addWidget(self.log_textbox)
 
-        # Добавляем элементы в вертикальный разделитель
-        self.right_splitter.addWidget(upper_container)
+        # Добавляем элементы в вертикальный разделитель по очереди
+        self.right_splitter.addWidget(folder_frame)
+        self.right_splitter.addWidget(settings_frame)
         self.right_splitter.addWidget(log_frame)
 
         content_layout.addWidget(self.right_splitter)
@@ -801,9 +796,16 @@ class DicomSplitterApp(QMainWindow):
         self.splitter.setCollapsible(1, False)  # Главную панель скрывать нельзя
         self.splitter.setSizes([220, 880])      # Пропорции по умолчанию (220px ширина дерева)
 
-        self.right_splitter.setCollapsible(0, True)  # Настройки можно скрыть
-        self.right_splitter.setCollapsible(1, True)  # Лог можно полностью свернуть
-        self.right_splitter.setSizes([380, 200])     # Размеры по умолчанию
+        self.right_splitter.setCollapsible(0, True)  # Папки можно скрыть
+        self.right_splitter.setCollapsible(1, True)  # Настройки можно скрыть
+        self.right_splitter.setCollapsible(2, True)  # Лог можно скрыть
+        
+        # Настройка растяжения: папки и настройки не растягиваются, лог растягивается
+        self.right_splitter.setStretchFactor(0, 0)
+        self.right_splitter.setStretchFactor(1, 0)
+        self.right_splitter.setStretchFactor(2, 1)
+
+        self.right_splitter.setSizes([100, 180, 300])     # Размеры по умолчанию
 
     def apply_styles(self) -> None:
         QApplication.instance().setStyleSheet("""
