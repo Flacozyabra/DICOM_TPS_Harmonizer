@@ -298,6 +298,62 @@ class PatientEditDialog(ctk.CTkToplevel):
         self.destroy()
 
 
+class ScanProgressDialog(ctk.CTkToplevel):
+    """Модальный диалог, отображающий прогресс сканирования директории."""
+
+    def __init__(self, parent: ctk.CTk, stop_event: threading.Event) -> None:
+        super().__init__(parent)
+        self.parent = parent
+        self.stop_event = stop_event
+        self.title(parent.loc("dialog_scan_title"))
+        self.geometry("380x150")
+        self.resizable(False, False)
+        
+        # Поверх родительского окна и блокировка
+        self.transient(parent)
+        self.grab_set()
+        
+        parent.update_idletasks()
+        x = parent.winfo_x() + (parent.winfo_width() - 380) // 2
+        y = parent.winfo_y() + (parent.winfo_height() - 150) // 2
+        self.geometry(f"+{x}+{y}")
+        
+        self.protocol("WM_DELETE_WINDOW", self.on_cancel)
+        
+        self.lbl_status = ctk.CTkLabel(
+            self, 
+            text=parent.loc("dialog_scan_finding"), 
+            font=ctk.CTkFont(size=12)
+        )
+        self.lbl_status.pack(pady=(20, 10), padx=20, anchor="w")
+        
+        self.progress_bar = ctk.CTkProgressBar(self, height=14, corner_radius=7)
+        self.progress_bar.pack(fill="x", padx=20, pady=5)
+        self.progress_bar.set(0)
+        
+        self.btn_cancel = ctk.CTkButton(
+            self, 
+            text=parent.loc("dialog_scan_cancel"), 
+            command=self.on_cancel,
+            fg_color="gray", 
+            hover_color="darkgray"
+        )
+        self.btn_cancel.pack(pady=(15, 10))
+        
+    def update_progress(self, current: int, total: int) -> None:
+        if total > 0:
+            prog = current / total
+            self.progress_bar.set(prog)
+            pct = int(prog * 100)
+            self.lbl_status.configure(
+                text=self.parent.loc("dialog_scan_progress", current, total, pct)
+            )
+
+    def on_cancel(self) -> None:
+        self.stop_event.set()
+        self.destroy()
+
+
 class DicomSplitterApp(ctk.CTk):
     """Главный класс графического интерфейса приложения DICOM TPS Harmonizer."""
 
@@ -945,6 +1001,14 @@ class DicomSplitterApp(ctk.CTk):
                         if self.is_processing and not self.stop_event.is_set():
                             self.percent_label.configure(text=self.loc("processing", int(prog * 100)))
                             
+                elif msg_type == "scan_progress":
+                    _, current, total = msg
+                    if hasattr(self, "scan_dialog") and self.scan_dialog:
+                        try:
+                            self.scan_dialog.update_progress(current, total)
+                        except Exception:
+                            pass
+
                 elif msg_type == "finished":
                     self.is_processing = False
                     self.start_btn.configure(
@@ -964,6 +1028,12 @@ class DicomSplitterApp(ctk.CTk):
                     self.tree_view.populate(tree_data)
                     self.scan_btn.configure(state="normal", text=self.loc("scan_input"))
                     self.on_tree_selection_change()
+                    if hasattr(self, "scan_dialog") and self.scan_dialog:
+                        try:
+                            self.scan_dialog.destroy()
+                        except Exception:
+                            pass
+                        self.scan_dialog = None
 
                 self.log_queue.task_done()
         except queue.Empty:
@@ -1123,16 +1193,18 @@ class DicomSplitterApp(ctk.CTk):
         self.scan_btn.configure(state="disabled", text=self.loc("tree_loading"))
         self.selection_label.configure(text=self.loc("tree_loading"))
         
-        threading.Thread(target=self._scan_thread, args=(path,), daemon=True).start()
+        self.scan_stop_event = threading.Event()
+        self.scan_dialog = ScanProgressDialog(self, self.scan_stop_event)
+        
+        threading.Thread(target=self._scan_thread, args=(path, self.scan_stop_event), daemon=True).start()
 
-    def _scan_thread(self, path: Path) -> None:
+    def _scan_thread(self, path: Path, stop_event: threading.Event) -> None:
         temp_config = ProcessingConfig(
             new_uids=False, split_multiframe=False, clean_tags=False,
             default_tags=False, explicit_vr=False, exclude_reports=False,
             split_series=self.split_series_var.get()
         )
         logger = QueueLogger(self.log_queue)
-        stop_event = threading.Event()
         processor = DicomProcessor(path, self.output_dir_var.get(), temp_config, logger, stop_event, lang=self.current_lang)
         
         try:
