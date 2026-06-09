@@ -2,11 +2,12 @@ from datetime import datetime
 import json
 import os
 import sys
+import platform
 import threading
 from pathlib import Path
 from typing import Any, Dict
 
-from PyQt6.QtCore import Qt, QObject, pyqtSignal, QSize
+from PyQt6.QtCore import Qt, QObject, pyqtSignal, QSize, QPoint
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFrame,
     QLabel, QPushButton, QLineEdit, QCheckBox, QProgressBar,
@@ -43,6 +44,80 @@ class QtLogger(BaseLogger):
         self.bridge.scan_progress_signal.emit(current, total)
 
 
+class LanguageSwitch(QFrame):
+    """Кастомный горизонтальный переключатель языков с флагами."""
+
+    def __init__(self, parent: QWidget, command=None, current_lang: str = "ru", resources_dir: Path = None) -> None:
+        super().__init__(parent)
+        self.command = command
+        self.lang = current_lang
+        
+        self.setFixedSize(76, 30)
+        self.setStyleSheet("""
+            QFrame {
+                background-color: #2D2D2D;
+                border: 1px solid #4B5563;
+                border-radius: 15px;
+            }
+        """)
+
+        # Загружаем картинки флагов
+        self.px_ru = QPixmap(str(resources_dir / "ru_flag.png"))
+        self.px_gb = QPixmap(str(resources_dir / "gb_flag.png"))
+
+        # Метка RU флага (слева)
+        self.lbl_ru = QLabel(self)
+        self.lbl_ru.setPixmap(self.px_ru)
+        self.lbl_ru.setScaledContents(True)
+        self.lbl_ru.setFixedSize(24, 16)
+        self.lbl_ru.move(9, 7)
+        self.lbl_ru.setStyleSheet("background: transparent; border: none;")
+
+        # Метка GB флага (справа)
+        self.lbl_gb = QLabel(self)
+        self.lbl_gb.setPixmap(self.px_gb)
+        self.lbl_gb.setScaledContents(True)
+        self.lbl_gb.setFixedSize(24, 16)
+        self.lbl_gb.move(43, 7)
+        self.lbl_gb.setStyleSheet("background: transparent; border: none;")
+
+        # Ползунок (slider)
+        self.slider = QFrame(self)
+        self.slider.setFixedSize(36, 24)
+        self.slider.setStyleSheet("""
+            QFrame {
+                background-color: #4B5563;
+                border: none;
+                border-radius: 12px;
+            }
+        """)
+
+        self.slider_img = QLabel(self.slider)
+        self.slider_img.setScaledContents(True)
+        self.slider_img.setFixedSize(24, 16)
+        self.slider_img.move(6, 4)
+        self.slider_img.setStyleSheet("background: transparent; border: none;")
+
+        self.update_slider_position()
+
+    def update_slider_position(self) -> None:
+        if self.lang == "ru":
+            self.slider.move(3, 3)
+            self.slider_img.setPixmap(self.px_ru)
+        else:
+            self.slider.move(37, 3)
+            self.slider_img.setPixmap(self.px_gb)
+
+    def mousePressEvent(self, event) -> None:
+        if self.lang == "ru":
+            self.lang = "en"
+        else:
+            self.lang = "ru"
+        self.update_slider_position()
+        if self.command:
+            self.command(self.lang)
+
+
 class CustomQuestionDialog(QDialog):
     """Кастомный диалог с вопросом о создании папок и тремя кнопками выбора."""
 
@@ -58,7 +133,7 @@ class CustomQuestionDialog(QDialog):
 
         lbl = QLabel(message, self)
         lbl.setWordWrap(True)
-        lbl.setStyleSheet("font-size: 13px; color: #E0E0E0;")
+        lbl.setStyleSheet("font-size: 13px; color: #E5E7EB;")
         layout.addWidget(lbl)
 
         btn_layout = QHBoxLayout()
@@ -107,7 +182,7 @@ class PatientEditDialog(QDialog):
 
         lbl_msg = QLabel(parent.loc("dialog_patient_message"), self)
         lbl_msg.setWordWrap(True)
-        lbl_msg.setStyleSheet("font-size: 12px; color: #E0E0E0;")
+        lbl_msg.setStyleSheet("font-size: 12px; color: #E5E7EB;")
         layout.addWidget(lbl_msg)
 
         form_layout = QGridLayout()
@@ -132,7 +207,7 @@ class PatientEditDialog(QDialog):
 
         btn_save = QPushButton(parent.loc("dialog_save"), self)
         btn_save.clicked.connect(self.on_save)
-        btn_save.setStyleSheet("background-color: #3B82F6; color: white; font-weight: bold;")
+        btn_save.setStyleSheet("background-color: #2563EB; color: white; font-weight: bold;")
         btn_layout.addWidget(btn_save)
 
         btn_skip = QPushButton(parent.loc("no"), self)
@@ -167,7 +242,7 @@ class ScanProgressDialog(QDialog):
         layout.setContentsMargins(20, 20, 20, 20)
 
         self.lbl_status = QLabel(parent.loc("dialog_scan_finding"), self)
-        self.lbl_status.setStyleSheet("font-size: 13px; color: #E0E0E0;")
+        self.lbl_status.setStyleSheet("font-size: 13px; color: #E5E7EB;")
         layout.addWidget(self.lbl_status)
 
         self.progress_bar = QProgressBar(self)
@@ -250,6 +325,7 @@ class DicomSplitterApp(QMainWindow):
         self.create_widgets()
         self.apply_styles()
         self.update_locale_texts()
+        self.set_dark_titlebar()
 
     def get_config_path(self) -> Path:
         """Возвращает путь к файлу конфигурации в AppData пользователя."""
@@ -352,13 +428,10 @@ class DicomSplitterApp(QMainWindow):
         self.update_locale_texts()
         self.save_last_paths()
         
-        # Обновляем оформление кнопок переключения
-        if lang == "ru":
-            self.btn_lang_ru.setStyleSheet("border: 2px solid #3B82F6; background-color: #2D2D2D; padding: 2px; border-radius: 4px;")
-            self.btn_lang_en.setStyleSheet("border: 1px solid #4B5563; background-color: transparent; padding: 2px; border-radius: 4px;")
-        else:
-            self.btn_lang_ru.setStyleSheet("border: 1px solid #4B5563; background-color: transparent; padding: 2px; border-radius: 4px;")
-            self.btn_lang_en.setStyleSheet("border: 2px solid #3B82F6; background-color: #2D2D2D; padding: 2px; border-radius: 4px;")
+        # Синхронизируем положение переключателя
+        if hasattr(self, "lang_switch"):
+            self.lang_switch.lang = lang
+            self.lang_switch.update_slider_position()
 
     def update_locale_texts(self) -> None:
         self.setWindowTitle(self.loc("title"))
@@ -391,9 +464,26 @@ class DicomSplitterApp(QMainWindow):
         else:
             self.start_btn.setText(self.loc("run_optimization"))
 
+    def set_dark_titlebar(self) -> None:
+        """Окрашивает верхнюю полосу заголовка окна в темный цвет на Windows."""
+        if platform.system() == "Windows":
+            try:
+                import ctypes
+                hwnd = int(self.winId())
+                # Атрибут DWMWA_USE_IMMERSIVE_DARK_MODE (20 в Win11, 19 в Win10)
+                for attr in [20, 19]:
+                    ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                        hwnd,
+                        attr,
+                        ctypes.byref(ctypes.c_int(1)),
+                        ctypes.sizeof(ctypes.c_int)
+                    )
+            except Exception:
+                pass
+
     def create_widgets(self) -> None:
         # Главный контейнер
-        central_widget = QWidget(self)
+        central_widget = QWidget()
         self.setCentralWidget(central_widget)
 
         main_layout = QHBoxLayout(central_widget)
@@ -403,7 +493,7 @@ class DicomSplitterApp(QMainWindow):
         # ----------------------------------------------------
         # 1. Левая боковая панель (Проводник пациентов)
         # ----------------------------------------------------
-        self.sidebar_frame = QFrame(self)
+        self.sidebar_frame = QFrame()
         self.sidebar_frame.setObjectName("sidebar")
         self.sidebar_frame.setFixedWidth(320)
         
@@ -413,11 +503,11 @@ class DicomSplitterApp(QMainWindow):
 
         # Заголовок боковой панели и кнопка "Сканировать"
         title_layout = QHBoxLayout()
-        self.sidebar_title = QLabel(self)
+        self.sidebar_title = QLabel()
         self.sidebar_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #FFFFFF;")
         title_layout.addWidget(self.sidebar_title)
 
-        self.scan_btn = QPushButton(self)
+        self.scan_btn = QPushButton()
         self.scan_btn.clicked.connect(self.run_input_scan)
         self.scan_btn.setStyleSheet("font-weight: bold; min-width: 90px;")
         title_layout.addWidget(self.scan_btn)
@@ -425,13 +515,13 @@ class DicomSplitterApp(QMainWindow):
         sidebar_layout.addLayout(title_layout)
 
         # Дерево QTreeWidget
-        self.tree_widget = QTreeWidget(self)
+        self.tree_widget = QTreeWidget()
         self.tree_widget.setHeaderHidden(True)
         self.tree_widget.itemChanged.connect(self.on_item_changed)
         sidebar_layout.addWidget(self.tree_widget)
 
         # Метка статуса выбора
-        self.selection_label = QLabel(self)
+        self.selection_label = QLabel()
         self.selection_label.setStyleSheet("font-size: 11px; font-weight: bold; color: #A0A0A0;")
         sidebar_layout.addWidget(self.selection_label)
 
@@ -440,53 +530,26 @@ class DicomSplitterApp(QMainWindow):
         # ----------------------------------------------------
         # 2. Правая основная панель
         # ----------------------------------------------------
-        self.content_frame = QFrame(self)
+        self.content_frame = QFrame()
         content_layout = QVBoxLayout(self.content_frame)
         content_layout.setContentsMargins(20, 15, 20, 15)
         content_layout.setSpacing(12)
 
         # Верхняя панель (Заголовок и Языковой переключатель)
         top_layout = QHBoxLayout()
-        self.title_label = QLabel(self)
+        self.title_label = QLabel()
         self.title_label.setStyleSheet("font-size: 20px; font-weight: bold; color: #FFFFFF;")
         top_layout.addWidget(self.title_label)
 
-        # Языковой переключатель на флагах
-        lang_layout = QHBoxLayout()
-        lang_layout.setSpacing(5)
-
+        # Слайдер переключения языков
         resources_dir = self.project_root / "themes"
-        px_ru = QPixmap(str(resources_dir / "ru_flag.png"))
-        px_en = QPixmap(str(resources_dir / "gb_flag.png"))
-
-        self.btn_lang_ru = QPushButton(self)
-        self.btn_lang_ru.setIcon(QIcon(px_ru))
-        self.btn_lang_ru.setIconSize(QSize(24, 16))
-        self.btn_lang_ru.setFixedSize(32, 24)
-        self.btn_lang_ru.clicked.connect(lambda: self.change_language("ru"))
-
-        self.btn_lang_en = QPushButton(self)
-        self.btn_lang_en.setIcon(QIcon(px_en))
-        self.btn_lang_en.setIconSize(QSize(24, 16))
-        self.btn_lang_en.setFixedSize(32, 24)
-        self.btn_lang_en.clicked.connect(lambda: self.change_language("en"))
-
-        # Установка рамки на активный язык при запуске
-        if self.current_lang == "ru":
-            self.btn_lang_ru.setStyleSheet("border: 2px solid #3B82F6; background-color: #2D2D2D; padding: 2px; border-radius: 4px;")
-            self.btn_lang_en.setStyleSheet("border: 1px solid #4B5563; background-color: transparent; padding: 2px; border-radius: 4px;")
-        else:
-            self.btn_lang_ru.setStyleSheet("border: 1px solid #4B5563; background-color: transparent; padding: 2px; border-radius: 4px;")
-            self.btn_lang_en.setStyleSheet("border: 2px solid #3B82F6; background-color: #2D2D2D; padding: 2px; border-radius: 4px;")
-
-        lang_layout.addWidget(self.btn_lang_ru)
-        lang_layout.addWidget(self.btn_lang_en)
-        top_layout.addLayout(lang_layout)
+        self.lang_switch = LanguageSwitch(self.content_frame, self.change_language, self.current_lang, resources_dir)
+        top_layout.addWidget(self.lang_switch)
         
         content_layout.addLayout(top_layout)
 
         # Группа 1: Выбор папок
-        folder_frame = QFrame(self)
+        folder_frame = QFrame()
         folder_frame.setObjectName("groupFrame")
         folder_layout = QGridLayout(folder_frame)
         folder_layout.setContentsMargins(15, 15, 15, 15)
@@ -498,53 +561,53 @@ class DicomSplitterApp(QMainWindow):
         self.img_open_out = QIcon(str(resources_dir / "open_folder_output.png"))
 
         # Папка ввода
-        self.btn_create_in = QPushButton(self)
+        self.btn_create_in = QPushButton()
         self.btn_create_in.setIcon(self.img_create)
         self.btn_create_in.setFixedSize(30, 30)
         self.btn_create_in.clicked.connect(lambda: self.ask_and_create_folder("input"))
         folder_layout.addWidget(self.btn_create_in, 0, 0)
 
-        self.input_label = QLabel(self)
+        self.input_label = QLabel()
         self.input_label.setStyleSheet("font-weight: bold; color: #FFFFFF;")
         folder_layout.addWidget(self.input_label, 0, 1)
 
-        self.input_entry = QLineEdit(self)
+        self.input_entry = QLineEdit()
         self.input_entry.setText(self.saved_input_path)
         folder_layout.addWidget(self.input_entry, 0, 2)
 
-        self.btn_open_in = QPushButton(self)
+        self.btn_open_in = QPushButton()
         self.btn_open_in.setIcon(self.img_open_in)
         self.btn_open_in.setFixedSize(30, 30)
         self.btn_open_in.clicked.connect(self.open_input_dir)
         folder_layout.addWidget(self.btn_open_in, 0, 3)
 
-        self.btn_browse_in = QPushButton(self)
+        self.btn_browse_in = QPushButton()
         self.btn_browse_in.clicked.connect(self.browse_input)
         self.btn_browse_in.setFixedWidth(100)
         folder_layout.addWidget(self.btn_browse_in, 0, 4)
 
         # Папка вывода
-        self.btn_create_out = QPushButton(self)
+        self.btn_create_out = QPushButton()
         self.btn_create_out.setIcon(self.img_create)
         self.btn_create_out.setFixedSize(30, 30)
         self.btn_create_out.clicked.connect(lambda: self.ask_and_create_folder("output"))
         folder_layout.addWidget(self.btn_create_out, 1, 0)
 
-        self.output_label = QLabel(self)
+        self.output_label = QLabel()
         self.output_label.setStyleSheet("font-weight: bold; color: #FFFFFF;")
         folder_layout.addWidget(self.output_label, 1, 1)
 
-        self.output_entry = QLineEdit(self)
+        self.output_entry = QLineEdit()
         self.output_entry.setText(self.saved_output_path)
         folder_layout.addWidget(self.output_entry, 1, 2)
 
-        self.btn_open_out = QPushButton(self)
+        self.btn_open_out = QPushButton()
         self.btn_open_out.setIcon(self.img_open_out)
         self.btn_open_out.setFixedSize(30, 30)
         self.btn_open_out.clicked.connect(self.open_output_dir)
         folder_layout.addWidget(self.btn_open_out, 1, 3)
 
-        self.btn_browse_out = QPushButton(self)
+        self.btn_browse_out = QPushButton()
         self.btn_browse_out.clicked.connect(self.browse_output)
         self.btn_browse_out.setFixedWidth(100)
         folder_layout.addWidget(self.btn_browse_out, 1, 4)
@@ -552,58 +615,58 @@ class DicomSplitterApp(QMainWindow):
         content_layout.addWidget(folder_frame)
 
         # Группа 2: Настройки оптимизации
-        settings_frame = QFrame(self)
+        settings_frame = QFrame()
         settings_frame.setObjectName("groupFrame")
         settings_layout = QGridLayout(settings_frame)
         settings_layout.setContentsMargins(15, 15, 15, 15)
         settings_layout.setSpacing(10)
 
-        self.settings_title = QLabel(self)
+        self.settings_title = QLabel()
         self.settings_title.setStyleSheet("font-size: 13px; font-weight: bold; color: #FFFFFF;")
         settings_layout.addWidget(self.settings_title, 0, 0, 1, 2)
 
-        self.cb_new_uids = QCheckBox(self)
+        self.cb_new_uids = QCheckBox()
         self.cb_new_uids.setChecked(True)
         settings_layout.addWidget(self.cb_new_uids, 1, 0)
 
-        self.cb_split_mf = QCheckBox(self)
+        self.cb_split_mf = QCheckBox()
         self.cb_split_mf.setChecked(True)
         settings_layout.addWidget(self.cb_split_mf, 1, 1)
 
-        self.cb_clean_tags = QCheckBox(self)
+        self.cb_clean_tags = QCheckBox()
         self.cb_clean_tags.setChecked(True)
         settings_layout.addWidget(self.cb_clean_tags, 2, 0)
 
-        self.cb_default_tags = QCheckBox(self)
+        self.cb_default_tags = QCheckBox()
         self.cb_default_tags.setChecked(True)
         settings_layout.addWidget(self.cb_default_tags, 2, 1)
 
-        self.cb_explicit_vr = QCheckBox(self)
+        self.cb_explicit_vr = QCheckBox()
         self.cb_explicit_vr.setChecked(True)
         settings_layout.addWidget(self.cb_explicit_vr, 3, 0)
 
-        self.cb_exclude_reports = QCheckBox(self)
+        self.cb_exclude_reports = QCheckBox()
         self.cb_exclude_reports.setChecked(True)
         settings_layout.addWidget(self.cb_exclude_reports, 3, 1)
 
-        self.cb_split_series = QCheckBox(self)
+        self.cb_split_series = QCheckBox()
         self.cb_split_series.setChecked(True)
         settings_layout.addWidget(self.cb_split_series, 4, 0)
 
         content_layout.addWidget(settings_frame)
 
         # Группа 3: Лог выполнения
-        log_frame = QFrame(self)
+        log_frame = QFrame()
         log_frame.setObjectName("groupFrame")
         log_layout = QVBoxLayout(log_frame)
         log_layout.setContentsMargins(15, 15, 15, 15)
         log_layout.setSpacing(8)
 
-        self.log_title = QLabel(self)
+        self.log_title = QLabel()
         self.log_title.setStyleSheet("font-size: 13px; font-weight: bold; color: #FFFFFF;")
         log_layout.addWidget(self.log_title)
 
-        self.log_textbox = QTextEdit(self)
+        self.log_textbox = QTextEdit()
         self.log_textbox.setReadOnly(True)
         self.log_textbox.setFont(QFont("Consolas", 10))
         log_layout.addWidget(self.log_textbox)
@@ -611,23 +674,23 @@ class DicomSplitterApp(QMainWindow):
         content_layout.addWidget(log_frame)
 
         # Группа 4: Прогресс и Кнопка пуска
-        control_frame = QFrame(self)
+        control_frame = QFrame()
         control_layout = QVBoxLayout(control_frame)
         control_layout.setContentsMargins(0, 0, 0, 0)
         control_layout.setSpacing(8)
 
-        self.progress_bar = QProgressBar(self)
+        self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         self.progress_bar.setFixedHeight(18)
         control_layout.addWidget(self.progress_bar)
 
-        self.percent_label = QLabel(self)
+        self.percent_label = QLabel()
         self.percent_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.percent_label.setStyleSheet("font-size: 11px; font-weight: bold; color: #FFFFFF;")
         control_layout.addWidget(self.percent_label)
 
-        self.start_btn = QPushButton(self)
+        self.start_btn = QPushButton()
         self.start_btn.setObjectName("startBtn")
         self.start_btn.setFixedHeight(40)
         self.start_btn.clicked.connect(self.start_processing)
@@ -638,9 +701,13 @@ class DicomSplitterApp(QMainWindow):
         main_layout.addWidget(self.content_frame)
 
     def apply_styles(self) -> None:
-        self.setStyleSheet("""
+        QApplication.instance().setStyleSheet("""
             QMainWindow {
                 background-color: #121212;
+            }
+            QDialog {
+                background-color: #1A1A1A;
+                border: 1px solid #2D2D2D;
             }
             QWidget {
                 color: #D1D5DB;
