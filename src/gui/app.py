@@ -805,7 +805,7 @@ class DicomSplitterApp(QMainWindow):
         self.right_splitter.setStretchFactor(1, 0)
         self.right_splitter.setStretchFactor(2, 1)
 
-        self.right_splitter.setSizes([100, 180, 300])     # Размеры по умолчанию
+        self.right_splitter.setSizes([90, 135, 245])     # Размеры по умолчанию
 
     def apply_styles(self) -> None:
         QApplication.instance().setStyleSheet("""
