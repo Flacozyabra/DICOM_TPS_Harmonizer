@@ -76,7 +76,7 @@
     "log_critical_error": "Критическая ошибка при обработке: {}",
     "split_series": "Разделять смешанные серии (геометрически)",
     "log_setting_split_series": " - Разделять геометрические серии: {}",
-    "patient_explorer": "Проводник пациентов",
+    "patient_explorer": "Пациенты",
     "scan_input": "Сканировать",
     "tree_loading": "Сканирование...",
     "tree_empty": "Пациенты не найдены.",

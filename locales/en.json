@@ -76,7 +76,7 @@
     "log_critical_error": "Critical error during processing: {}",
     "split_series": "Split mixed series (geometrically)",
     "log_setting_split_series": " - Split geometric series: {}",
-    "patient_explorer": "Patient Explorer",
+    "patient_explorer": "Patients",
     "scan_input": "Scan",
     "tree_loading": "Scanning...",
     "tree_empty": "No patients found.",

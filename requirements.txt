@@ -1,6 +1,6 @@
 pydicom>=2.4.0
 numpy>=1.20.0
-customtkinter>=5.2.0
+PyQt6>=6.5.0
 pylibjpeg
 pylibjpeg-libjpeg
 pylibjpeg-openjpeg
