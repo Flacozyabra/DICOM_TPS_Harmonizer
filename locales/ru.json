@@ -88,5 +88,9 @@
     "dialog_scan_title": "Сканирование папки",
     "dialog_scan_finding": "Поиск файлов DICOM...",
     "dialog_scan_progress": "Просканировано: {} / {} файлов ({}%)",
-    "dialog_scan_cancel": "Отмена"
+    "dialog_scan_cancel": "Отмена",
+    "tooltip_create_input": "Создать папку Dicom_input в каталоге программы",
+    "tooltip_create_output": "Создать папку Dicom_output в каталоге программы",
+    "tooltip_open_input": "Открыть папку ввода в Проводнике",
+    "tooltip_open_output": "Открыть папку вывода в Проводнике"
 }

@@ -7,18 +7,35 @@ import threading
 from pathlib import Path
 from typing import Any, Dict
 
-from PyQt6.QtCore import Qt, QObject, pyqtSignal, QSize, QPoint
+from PyQt6.QtCore import Qt, QObject, pyqtSignal, QSize, QPoint, QByteArray
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFrame,
     QLabel, QPushButton, QLineEdit, QCheckBox, QProgressBar,
     QTextEdit, QTreeWidget, QTreeWidgetItem, QFileDialog, QDialog,
-    QGridLayout, QMessageBox, QApplication
+    QGridLayout, QMessageBox, QApplication, QSplitter
 )
 from PyQt6.QtGui import QIcon, QFont, QTextCursor, QPixmap, QBrush, QColor
 
 from src.core.config import ProcessingConfig
 from src.core.processor import DicomProcessor
 from src.utils.logger import BaseLogger
+
+def set_dark_titlebar(window: QWidget) -> None:
+    """Окрашивает верхнюю полосу заголовка окна в темный цвет на Windows."""
+    if platform.system() == "Windows":
+        try:
+            import ctypes
+            hwnd = int(window.winId())
+            # Атрибут DWMWA_USE_IMMERSIVE_DARK_MODE (20 в Win11, 19 в Win10)
+            for attr in [20, 19]:
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                    hwnd,
+                    attr,
+                    ctypes.byref(ctypes.c_int(1)),
+                    ctypes.sizeof(ctypes.c_int)
+                )
+        except Exception:
+            pass
 
 # Сигнальный мост для безопасной передачи сообщений из фоновых потоков в GUI
 class QtSignalBridge(QObject):
@@ -162,6 +179,10 @@ class CustomQuestionDialog(QDialog):
         self.result_value = val
         self.accept()
 
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        set_dark_titlebar(self)
+
 
 class PatientEditDialog(QDialog):
     """Диалог для интерактивной коррекции имени и ID пациента."""
@@ -226,6 +247,10 @@ class PatientEditDialog(QDialog):
         self.cancelled = True
         self.reject()
 
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        set_dark_titlebar(self)
+
 
 class ScanProgressDialog(QDialog):
     """Модальный диалог, отображающий прогресс сканирования директории."""
@@ -268,6 +293,10 @@ class ScanProgressDialog(QDialog):
     def on_cancel(self) -> None:
         self.stop_event.set()
         self.reject()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        set_dark_titlebar(self)
 
 
 class DicomSplitterApp(QMainWindow):
@@ -325,7 +354,7 @@ class DicomSplitterApp(QMainWindow):
         self.create_widgets()
         self.apply_styles()
         self.update_locale_texts()
-        self.set_dark_titlebar()
+        self.restore_window_state()
 
     def get_config_path(self) -> Path:
         """Возвращает путь к файлу конфигурации в AppData пользователя."""
@@ -382,11 +411,35 @@ class DicomSplitterApp(QMainWindow):
             
         config_data["language"] = lang
         
+        # Сохраняем геометрию главного окна и состояние сплиттера
+        config_data["window_geometry"] = self.saveGeometry().toHex().data().decode('utf-8')
+        if hasattr(self, "splitter"):
+            config_data["splitter_state"] = self.splitter.saveState().toHex().data().decode('utf-8')
+        
         try:
             with open(config_file, "w", encoding="utf-8") as f:
                 json.dump(config_data, f, ensure_ascii=False, indent=4)
         except Exception:
             pass
+
+    def restore_window_state(self) -> None:
+        config_file = self.get_config_path()
+        if config_file.exists():
+            try:
+                with open(config_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    
+                    # Восстановление геометрии главного окна
+                    geom_hex = data.get("window_geometry", "")
+                    if geom_hex:
+                        self.restoreGeometry(QByteArray.fromHex(geom_hex.encode('utf-8')))
+                        
+                    # Восстановление состояния сплиттера
+                    state_hex = data.get("splitter_state", "")
+                    if state_hex and hasattr(self, "splitter"):
+                        self.splitter.restoreState(QByteArray.fromHex(state_hex.encode('utf-8')))
+            except Exception:
+                pass
 
     def load_locale(self, lang: str) -> None:
         if getattr(sys, "frozen", False):
@@ -454,6 +507,12 @@ class DicomSplitterApp(QMainWindow):
         self.scan_btn.setText(self.loc("scan_input"))
         self.log_title.setText(self.loc("log_title"))
         
+        # Tooltips
+        self.btn_create_in.setToolTip(self.loc("tooltip_create_input"))
+        self.btn_create_out.setToolTip(self.loc("tooltip_create_output"))
+        self.btn_open_in.setToolTip(self.loc("tooltip_open_input"))
+        self.btn_open_out.setToolTip(self.loc("tooltip_open_output"))
+
         self.update_selection_label()
 
         if self.is_processing:
@@ -481,6 +540,14 @@ class DicomSplitterApp(QMainWindow):
             except Exception:
                 pass
 
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self.set_dark_titlebar()
+
+    def closeEvent(self, event) -> None:
+        self.save_last_paths()
+        super().closeEvent(event)
+
     def create_widgets(self) -> None:
         # Главный контейнер
         central_widget = QWidget()
@@ -490,12 +557,15 @@ class DicomSplitterApp(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
+        # Создаем разделитель (splitter)
+        self.splitter = QSplitter(Qt.Orientation.Horizontal)
+
         # ----------------------------------------------------
         # 1. Левая боковая панель (Проводник пациентов)
         # ----------------------------------------------------
         self.sidebar_frame = QFrame()
         self.sidebar_frame.setObjectName("sidebar")
-        self.sidebar_frame.setFixedWidth(320)
+        self.sidebar_frame.setMinimumWidth(0) # Позволяет сжимать до 0
         
         sidebar_layout = QVBoxLayout(self.sidebar_frame)
         sidebar_layout.setContentsMargins(15, 15, 15, 15)
@@ -525,7 +595,7 @@ class DicomSplitterApp(QMainWindow):
         self.selection_label.setStyleSheet("font-size: 11px; font-weight: bold; color: #A0A0A0;")
         sidebar_layout.addWidget(self.selection_label)
 
-        main_layout.addWidget(self.sidebar_frame)
+        self.splitter.addWidget(self.sidebar_frame)
 
         # ----------------------------------------------------
         # 2. Правая основная панель
@@ -698,7 +768,13 @@ class DicomSplitterApp(QMainWindow):
 
         content_layout.addWidget(control_frame)
 
-        main_layout.addWidget(self.content_frame)
+        self.splitter.addWidget(self.content_frame)
+        main_layout.addWidget(self.splitter)
+
+        # Настройки сплиттера
+        self.splitter.setCollapsible(0, True)   # Дерево может быть скрыто полностью
+        self.splitter.setCollapsible(1, False)  # Главную панель скрывать нельзя
+        self.splitter.setSizes([320, 780])      # Пропорции по умолчанию
 
     def apply_styles(self) -> None:
         QApplication.instance().setStyleSheet("""
@@ -828,6 +904,22 @@ class DicomSplitterApp(QMainWindow):
             QCheckBox::indicator:checked {
                 background-color: #2563EB;
                 border-color: #2563EB;
+            }
+            QSplitter::handle {
+                background-color: #2D2D2D;
+            }
+            QSplitter::handle:horizontal {
+                width: 4px;
+            }
+            QSplitter::handle:hover {
+                background-color: #3B82F6;
+            }
+            QToolTip {
+                background-color: #1A1A1A;
+                color: #E5E7EB;
+                border: 1px solid #374151;
+                border-radius: 4px;
+                padding: 4px;
             }
         """)
 
