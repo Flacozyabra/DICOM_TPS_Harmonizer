@@ -696,7 +696,7 @@ class DicomSplitterApp(QMainWindow):
         self.start_btn.clicked.connect(self.start_processing)
         control_layout.addWidget(self.start_btn)
 
-        content_layout.addLayout(control_layout)
+        content_layout.addWidget(control_frame)
 
         main_layout.addWidget(self.content_frame)
 
