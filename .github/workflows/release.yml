@@ -35,8 +35,9 @@ jobs:
       - name: Verify build output
         shell: pwsh
         run: |
-          if (Test-Path "dist/DICOM_TPS_Harmonizer.exe") {
-            Write-Host "Executable built successfully."
+          $exe = Get-ChildItem "dist/DICOM_TPS_Harmonizer_v*.exe" | Select-Object -First 1
+          if ($exe -and $exe.Exists) {
+            Write-Host "Executable built successfully: $($exe.FullName)"
           } else {
             Write-Error "Executable not found in dist/ folder."
             exit 1
@@ -45,7 +46,7 @@ jobs:
       - name: Create Release and Upload Asset
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/DICOM_TPS_Harmonizer.exe
+          files: dist/DICOM_TPS_Harmonizer_v*.exe
           draft: false
           prerelease: false
           generate_release_notes: true
