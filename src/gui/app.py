@@ -782,13 +782,8 @@ class DicomSplitterApp(QMainWindow):
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        self.progress_bar.setFixedHeight(18)
+        self.progress_bar.setFixedHeight(24)
         control_layout.addWidget(self.progress_bar)
-
-        self.percent_label = QLabel()
-        self.percent_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.percent_label.setStyleSheet("font-size: 11px; font-weight: bold; color: #FFFFFF;")
-        control_layout.addWidget(self.percent_label)
 
         self.start_btn = QPushButton()
         self.start_btn.setObjectName("startBtn")
@@ -806,7 +801,7 @@ class DicomSplitterApp(QMainWindow):
         self.splitter.setCollapsible(1, False)  # Главную панель скрывать нельзя
         self.splitter.setSizes([220, 880])      # Пропорции по умолчанию (220px ширина дерева)
 
-        self.right_splitter.setCollapsible(0, False) # Настройки скрывать нельзя
+        self.right_splitter.setCollapsible(0, True)  # Настройки можно скрыть
         self.right_splitter.setCollapsible(1, True)  # Лог можно полностью свернуть
         self.right_splitter.setSizes([380, 200])     # Размеры по умолчанию
 
@@ -1066,8 +1061,6 @@ class DicomSplitterApp(QMainWindow):
             prog = current / total
             pct = int(prog * 100)
             self.progress_bar.setValue(pct)
-            if self.is_processing and not self.stop_event.is_set():
-                self.percent_label.setText(self.loc("processing", pct))
 
     def update_scan_progress(self, current: int, total: int) -> None:
         if self.scan_dialog:
@@ -1079,11 +1072,6 @@ class DicomSplitterApp(QMainWindow):
         self.start_btn.setText(self.loc("run_optimization"))
         self.start_btn.setEnabled(True)
         self.apply_styles() # Обновит стиль (вернет синий цвет кнопки)
-
-        if self.stop_event.is_set():
-            self.percent_label.setText(self.loc("finished_stopped"))
-        else:
-            self.percent_label.setText(self.loc("finished"))
         self.set_gui_enabled(True)
 
     def on_tree_scanned(self, tree_data: dict) -> None:
@@ -1203,6 +1191,7 @@ class DicomSplitterApp(QMainWindow):
         
         total_patients = self.tree_widget.topLevelItemCount()
         total_studies = 0
+        total_series = 0
         total_files_count = 0
         
         for i in range(total_patients):
@@ -1210,13 +1199,14 @@ class DicomSplitterApp(QMainWindow):
             total_studies += pat_item.childCount()
             for j in range(pat_item.childCount()):
                 study_item = pat_item.child(j)
+                total_series += study_item.childCount()
                 for k in range(study_item.childCount()):
                     series_item = study_item.child(k)
                     data = series_item.data(0, Qt.ItemDataRole.UserRole)
                     if data and data[0] == "series":
                         total_files_count += len(data[3])
                         
-        text = self.loc("selected_status", len(selected_files), total_files_count, total_patients, total_studies)
+        text = self.loc("selected_status", len(selected_files), total_files_count, total_patients, total_studies, total_series)
         self.selection_label.setText(text)
 
     # Запуск сканирования входной папки
@@ -1286,7 +1276,6 @@ class DicomSplitterApp(QMainWindow):
             self.stop_event.set()
             self.start_btn.setText(self.loc("status_stopping"))
             self.start_btn.setEnabled(False)
-            self.percent_label.setText(self.loc("stopping"))
             return
 
         input_raw = self.input_entry.text()
@@ -1347,7 +1336,6 @@ class DicomSplitterApp(QMainWindow):
         self.start_btn.setText(self.loc("stop_optimization"))
         self.apply_styles() # Обновит стиль (сделает кнопку красной)
         
-        self.percent_label.setText(self.loc("processing", 0))
         self.progress_bar.setValue(0)
         self.log_textbox.clear()
 

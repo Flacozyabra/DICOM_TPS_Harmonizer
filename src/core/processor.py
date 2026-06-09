@@ -256,6 +256,21 @@ class DicomProcessor:
         if segment_idx > 0:
             series_desc = f"{series_desc}_Seg{segment_idx}"
 
+        # Проверка на исключение служебных серий до создания папок
+        if self.config.exclude_reports:
+            series_desc_lower = series_desc.lower()
+            exclude_keywords = {
+                'topogram', 'scout', 'patient protocol', 'dose report', 
+                'protocol', 'report', 'screenshot'
+            }
+            is_excluded = any(kw in series_desc_lower for kw in exclude_keywords) or modality in ('SR', 'PR')
+            if is_excluded:
+                self.logger.log(self.loc("log_skip_service", series_desc, modality))
+                self.excluded_count += len(items)
+                self.processed_count += len(items)
+                self.logger.update_progress(self.processed_count, total_files)
+                return
+
         patient_name = make_safe_filename(pat_name)
         patient_id = make_safe_filename(pat_id)
         patient_folder = f"{patient_name}_{patient_id}"
@@ -295,20 +310,7 @@ class DicomProcessor:
 
             filename = file_path.name
             
-            # Исключение служебных серий
-            if self.config.exclude_reports:
-                series_desc_lower = series_desc.lower()
-                exclude_keywords = {
-                    'topogram', 'scout', 'patient protocol', 'dose report', 
-                    'protocol', 'report', 'screenshot'
-                }
-                is_excluded = any(kw in series_desc_lower for kw in exclude_keywords) or modality in ('SR', 'PR')
-                if is_excluded:
-                    self.logger.log(self.loc("log_skip_service", series_desc, modality))
-                    self.excluded_count += 1
-                    self.processed_count += 1
-                    self.logger.update_progress(self.processed_count, total_files)
-                    continue
+
 
             try:
                 ds_full = safe_dcmread(file_path, stop_before_pixels=False)
@@ -517,8 +519,15 @@ class DicomProcessor:
                         file_path, series_num, series_desc, modality, orientation_key = item
                         orientation_groups.setdefault(orientation_key, []).append(item)
 
-                    if not self.config.split_series or len(orientation_groups) <= 1:
-                        _, series_num, series_desc, modality, _ = files_info[0]
+                    _, series_num, series_desc, modality, _ = files_info[0]
+                    series_desc_lower = series_desc.lower()
+                    exclude_keywords = {
+                        'topogram', 'scout', 'patient protocol', 'dose report', 
+                        'protocol', 'report', 'screenshot'
+                    }
+                    is_ignored = any(kw in series_desc_lower for kw in exclude_keywords) or modality in ('SR', 'PR')
+
+                    if is_ignored or not self.config.split_series or len(orientation_groups) <= 1:
                         series_label = f"Series {series_num}: {modality} - {series_desc}"
                         final_series[(series_label, s_uid, 0)] = [x[0] for x in files_info]
                     else:
