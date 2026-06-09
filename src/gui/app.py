@@ -1,436 +1,255 @@
 from datetime import datetime
 import json
 import os
-import queue
 import sys
 import threading
 from pathlib import Path
-from tkinter import filedialog
-from typing import Any
+from typing import Any, Dict
 
-from PIL import Image
-
-import customtkinter as ctk
+from PyQt6.QtCore import Qt, QObject, pyqtSignal, QSize
+from PyQt6.QtWidgets import (
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFrame,
+    QLabel, QPushButton, QLineEdit, QCheckBox, QProgressBar,
+    QTextEdit, QTreeWidget, QTreeWidgetItem, QFileDialog, QDialog,
+    QGridLayout, QMessageBox, QApplication
+)
+from PyQt6.QtGui import QIcon, QFont, QTextCursor, QPixmap, QBrush, QColor
 
 from src.core.config import ProcessingConfig
 from src.core.processor import DicomProcessor
-from src.utils.logger import QueueLogger
+from src.utils.logger import BaseLogger
 
-# Настройки оформления CustomTkinter
-ctk.set_appearance_mode("dark")
-
-
-class LanguageSwitch(ctk.CTkFrame):
-    """Кастомный горизонтальный переключатель языков с флагами."""
-
-    def __init__(self, parent: ctk.CTk, ru_image: ctk.CTkImage, gb_image: ctk.CTkImage, command=None, current_lang: str = "ru", **kwargs) -> None:
-        super().__init__(parent, width=76, height=30, corner_radius=15, fg_color=("#E5E7EB", "#2D2D2D"), **kwargs)
-        self.command = command
-        self.lang = current_lang
-        self.img_ru = ru_image
-        self.img_gb = gb_image
-        
-        self.pack_propagate(False)
-        self.grid_propagate(False)
-
-        self.bind("<Button-1>", self.toggle)
-
-        self.lbl_ru = ctk.CTkLabel(self, text="", image=self.img_ru, width=24, height=16)
-        self.lbl_ru.place(x=9, y=7)
-        self.lbl_ru.bind("<Button-1>", self.toggle)
-
-        self.lbl_gb = ctk.CTkLabel(self, text="", image=self.img_gb, width=24, height=16)
-        self.lbl_gb.place(x=43, y=7)
-        self.lbl_gb.bind("<Button-1>", self.toggle)
-
-        self.slider = ctk.CTkFrame(
-            self,
-            width=36,
-            height=24,
-            corner_radius=12,
-            fg_color=("#9CA3AF", "#4B5563"),
-            border_width=0
-        )
-        self.slider.bind("<Button-1>", self.toggle)
-        
-        self.slider_img = ctk.CTkLabel(self.slider, text="", image=self.img_ru, width=24, height=16)
-        self.slider_img.place(x=6, y=4)
-        self.slider_img.bind("<Button-1>", self.toggle)
-
-        if self.lang == "ru":
-            self.slider.place(x=3, y=3)
-            self.slider_img.configure(image=self.img_ru)
-        else:
-            self.slider.place(x=37, y=3)
-            self.slider_img.configure(image=self.img_gb)
-
-    def toggle(self, event=None) -> None:
-        if self.lang == "ru":
-            self.lang = "en"
-            self.slider.place(x=37, y=3)
-            self.slider_img.configure(image=self.img_gb)
-        else:
-            self.lang = "ru"
-            self.slider.place(x=3, y=3)
-            self.slider_img.configure(image=self.img_ru)
-        
-        if self.command:
-            self.command(self.lang)
+# Сигнальный мост для безопасной передачи сообщений из фоновых потоков в GUI
+class QtSignalBridge(QObject):
+    log_signal = pyqtSignal(str, str)          # text, tag
+    progress_signal = pyqtSignal(int, int)      # current, total
+    scan_progress_signal = pyqtSignal(int, int) # current, total
+    finished_signal = pyqtSignal()
+    tree_scanned_signal = pyqtSignal(dict)
 
 
-class CustomQuestionDialog(ctk.CTkToplevel):
+# Адаптер логгера для отправки сообщений через сигналы Qt
+class QtLogger(BaseLogger):
+    def __init__(self, bridge: QtSignalBridge) -> None:
+        self.bridge = bridge
+
+    def log(self, text: str, tag: str = "info") -> None:
+        self.bridge.log_signal.emit(text, tag)
+
+    def update_progress(self, current: int, total: int) -> None:
+        self.bridge.progress_signal.emit(current, total)
+
+    def update_scan_progress(self, current: int, total: int) -> None:
+        self.bridge.scan_progress_signal.emit(current, total)
+
+
+class CustomQuestionDialog(QDialog):
     """Кастомный диалог с вопросом о создании папок и тремя кнопками выбора."""
 
-    def __init__(self, parent: ctk.CTk, title: str, message: str) -> None:
+    def __init__(self, parent: QWidget, title: str, message: str) -> None:
         super().__init__(parent)
-        self.title(title)
-        self.result = None
+        self.setWindowTitle(title)
+        self.setFixedSize(400, 150)
+        self.setModal(True)
+        self.result_value = None
 
-        self.geometry("400x150")
-        self.resizable(False, False)
-        
-        # Поверх родительского окна и блокировка взаимодействия
-        self.transient(parent)
-        self.grab_set()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
 
-        # Центрирование относительно родителя
-        parent.update_idletasks()
-        x = parent.winfo_x() + (parent.winfo_width() - 400) // 2
-        y = parent.winfo_y() + (parent.winfo_height() - 150) // 2
-        self.geometry(f"+{x}+{y}")
+        lbl = QLabel(message, self)
+        lbl.setWordWrap(True)
+        lbl.setStyleSheet("font-size: 13px; color: #E0E0E0;")
+        layout.addWidget(lbl)
 
-        # Сообщение
-        lbl = ctk.CTkLabel(self, text=message, wraplength=360, font=ctk.CTkFont(size=13))
-        lbl.pack(pady=(20, 20), padx=20)
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(10)
 
-        # Контейнер для кнопок
-        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
-        btn_frame.pack(fill="x", padx=20, pady=(0, 15))
-
-        # Локализованные тексты кнопок
+        # Тексты кнопок
         text_yes = parent.loc("yes")
         text_no = parent.loc("no")
         text_both = parent.loc("create_both")
 
-        btn_yes = ctk.CTkButton(btn_frame, text=text_yes, width=90, command=self.on_yes)
-        btn_yes.pack(side="left", padx=5, expand=True)
+        btn_yes = QPushButton(text_yes, self)
+        btn_yes.clicked.connect(lambda: self.finish("yes"))
+        btn_layout.addWidget(btn_yes)
 
-        btn_no = ctk.CTkButton(btn_frame, text=text_no, width=90, command=self.on_no)
-        btn_no.pack(side="left", padx=5, expand=True)
+        btn_no = QPushButton(text_no, self)
+        btn_no.clicked.connect(lambda: self.finish("no"))
+        btn_layout.addWidget(btn_no)
 
-        btn_both = ctk.CTkButton(btn_frame, text=text_both, width=120, command=self.on_both)
-        btn_both.pack(side="left", padx=5, expand=True)
+        btn_both = QPushButton(text_both, self)
+        btn_both.clicked.connect(lambda: self.finish("both"))
+        btn_layout.addWidget(btn_both)
 
-        # Ждем закрытия
-        self.wait_window()
+        layout.addLayout(btn_layout)
 
-    def on_yes(self) -> None:
-        self.result = "yes"
-        self.destroy()
-
-    def on_no(self) -> None:
-        self.result = "no"
-        self.destroy()
-
-    def on_both(self) -> None:
-        self.result = "both"
-        self.destroy()
+    def finish(self, val: str) -> None:
+        self.result_value = val
+        self.accept()
 
 
+class PatientEditDialog(QDialog):
+    """Диалог для интерактивной коррекции имени и ID пациента."""
 
-class TreeNode:
-    def __init__(self, level: int, label: str, key: Any, files: list = None, parent=None):
-        self.level = level  # 0: patient, 1: study, 2: series
-        self.label = label
-        self.key = key
-        self.files = files or []
-        self.parent = parent
-        self.children = []
-        self.checkbox = None
-        self.var = None  # ctk.BooleanVar
-
-
-class CTkPatientTree(ctk.CTkScrollableFrame):
-    def __init__(self, master, on_selection_change=None, **kwargs):
-        super().__init__(master, **kwargs)
-        self.on_selection_change = on_selection_change
-        self.all_nodes = []
-        
-    def clear(self):
-        for widget in self.winfo_children():
-            widget.destroy()
-        self.all_nodes = []
-
-    def populate(self, tree_data: dict):
-        self.clear()
-        
-        for (pat_name, pat_id), studies in sorted(tree_data.items(), key=lambda x: str(x[0])):
-            # Create Patient Node
-            pat_label = f"{pat_name} [{pat_id}]"
-            pat_node = TreeNode(0, pat_label, (pat_name, pat_id))
-            self.all_nodes.append(pat_node)
-            
-            for (study_date, study_desc, study_uid), series_dict in sorted(studies.items(), key=lambda x: str(x[0])):
-                # Create Study Node
-                study_label = f"{study_date} - {study_desc}" if study_date else study_desc
-                study_node = TreeNode(1, study_label, study_uid, parent=pat_node)
-                pat_node.children.append(study_node)
-                self.all_nodes.append(study_node)
-                
-                for (series_label, s_uid, seg_idx), files in sorted(series_dict.items(), key=lambda x: str(x[0])):
-                    # Create Series Node
-                    series_node = TreeNode(2, series_label, (s_uid, seg_idx), files=files, parent=study_node)
-                    study_node.children.append(series_node)
-                    self.all_nodes.append(series_node)
-
-        # Render widgets
-        for node in self.all_nodes:
-            node.var = ctk.BooleanVar(value=True)
-            
-            padx = 5
-            if node.level == 1:
-                padx = (25, 5)
-            elif node.level == 2:
-                padx = (45, 5)
-                
-            cb = ctk.CTkCheckBox(
-                self,
-                text=node.label,
-                variable=node.var,
-                command=lambda n=node: self.on_node_toggle(n),
-                font=ctk.CTkFont(size=11 + (2 - node.level))
-            )
-            cb.pack(anchor="w", padx=padx, pady=3, fill="x")
-            node.checkbox = cb
-
-    def on_node_toggle(self, node: TreeNode):
-        state = node.var.get()
-        self._set_children_state(node, state)
-        self._update_parent_states(node)
-        
-        if self.on_selection_change:
-            self.on_selection_change()
-
-    def _set_children_state(self, node: TreeNode, state: bool):
-        for child in node.children:
-            child.var.set(state)
-            self._set_children_state(child, state)
-
-    def _update_parent_states(self, node: TreeNode):
-        parent = node.parent
-        if parent:
-            any_checked = any(c.var.get() for c in parent.children)
-            parent.var.set(any_checked)
-            self._update_parent_states(parent)
-
-    def get_selected_files(self) -> list:
-        selected_files = []
-        for node in self.all_nodes:
-            if node.level == 2 and node.var.get():
-                selected_files.extend(node.files)
-        return selected_files
-
-    def get_patient_nodes(self) -> list:
-        return [node for node in self.all_nodes if node.level == 0]
-
-
-class PatientEditDialog(ctk.CTkToplevel):
-    def __init__(self, parent: ctk.CTk, current_name: str, current_id: str) -> None:
+    def __init__(self, parent: QWidget, current_name: str, current_id: str) -> None:
         super().__init__(parent)
-        self.title(parent.loc("dialog_patient_info"))
-        self.geometry("420x250")
-        self.resizable(False, False)
-        
-        self.transient(parent)
-        self.grab_set()
-        
-        parent.update_idletasks()
-        x = parent.winfo_x() + (parent.winfo_width() - 420) // 2
-        y = parent.winfo_y() + (parent.winfo_height() - 250) // 2
-        self.geometry(f"+{x}+{y}")
-        
+        self.parent = parent
+        self.setWindowTitle(parent.loc("dialog_patient_info"))
+        self.setFixedSize(420, 260)
+        self.setModal(True)
+
         self.new_name = current_name
         self.new_id = current_id
         self.cancelled = False
-        
-        lbl_msg = ctk.CTkLabel(
-            self,
-            text=parent.loc("dialog_patient_message"),
-            wraplength=380,
-            justify="left",
-            font=ctk.CTkFont(size=12)
-        )
-        lbl_msg.pack(pady=(15, 15), padx=20)
-        
-        fields_frame = ctk.CTkFrame(self, fg_color="transparent")
-        fields_frame.pack(fill="x", padx=20, pady=5)
-        
-        lbl_name = ctk.CTkLabel(fields_frame, text=parent.loc("dialog_pat_name"), width=100, anchor="w")
-        lbl_name.grid(row=0, column=0, padx=5, pady=5, sticky="w")
-        self.ent_name = ctk.CTkEntry(fields_frame, width=260)
-        self.ent_name.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
-        self.ent_name.insert(0, current_name)
-        
-        lbl_id = ctk.CTkLabel(fields_frame, text=parent.loc("dialog_pat_id"), width=100, anchor="w")
-        lbl_id.grid(row=1, column=0, padx=5, pady=5, sticky="w")
-        self.ent_id = ctk.CTkEntry(fields_frame, width=260)
-        self.ent_id.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
-        self.ent_id.insert(0, current_id)
-        
-        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
-        btn_frame.pack(fill="x", padx=20, pady=(20, 10))
-        
-        btn_save = ctk.CTkButton(btn_frame, text=parent.loc("dialog_save"), command=self.on_save)
-        btn_save.pack(side="left", padx=10, expand=True)
-        
-        btn_skip = ctk.CTkButton(btn_frame, text=parent.loc("no"), fg_color="gray", hover_color="darkgray", command=self.on_skip)
-        btn_skip.pack(side="left", padx=10, expand=True)
-        
-        self.wait_window()
-        
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        lbl_msg = QLabel(parent.loc("dialog_patient_message"), self)
+        lbl_msg.setWordWrap(True)
+        lbl_msg.setStyleSheet("font-size: 12px; color: #E0E0E0;")
+        layout.addWidget(lbl_msg)
+
+        form_layout = QGridLayout()
+        form_layout.setSpacing(10)
+
+        lbl_name = QLabel(parent.loc("dialog_pat_name"), self)
+        form_layout.addWidget(lbl_name, 0, 0)
+        self.ent_name = QLineEdit(self)
+        self.ent_name.setText(current_name)
+        form_layout.addWidget(self.ent_name, 0, 1)
+
+        lbl_id = QLabel(parent.loc("dialog_pat_id"), self)
+        form_layout.addWidget(lbl_id, 1, 0)
+        self.ent_id = QLineEdit(self)
+        self.ent_id.setText(current_id)
+        form_layout.addWidget(self.ent_id, 1, 1)
+
+        layout.addLayout(form_layout)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(15)
+
+        btn_save = QPushButton(parent.loc("dialog_save"), self)
+        btn_save.clicked.connect(self.on_save)
+        btn_save.setStyleSheet("background-color: #3B82F6; color: white; font-weight: bold;")
+        btn_layout.addWidget(btn_save)
+
+        btn_skip = QPushButton(parent.loc("no"), self)
+        btn_skip.clicked.connect(self.on_skip)
+        btn_skip.setStyleSheet("background-color: #4B5563; color: white;")
+        btn_layout.addWidget(btn_skip)
+
+        layout.addLayout(btn_layout)
+
     def on_save(self) -> None:
-        self.new_name = self.ent_name.get().strip()
-        self.new_id = self.ent_id.get().strip()
-        self.destroy()
-        
+        self.new_name = self.ent_name.text().strip()
+        self.new_id = self.ent_id.text().strip()
+        self.accept()
+
     def on_skip(self) -> None:
         self.cancelled = True
-        self.destroy()
+        self.reject()
 
 
-class ScanProgressDialog(ctk.CTkToplevel):
+class ScanProgressDialog(QDialog):
     """Модальный диалог, отображающий прогресс сканирования директории."""
 
-    def __init__(self, parent: ctk.CTk, stop_event: threading.Event) -> None:
+    def __init__(self, parent: QWidget, stop_event: threading.Event) -> None:
         super().__init__(parent)
         self.parent = parent
         self.stop_event = stop_event
-        self.title(parent.loc("dialog_scan_title"))
-        self.geometry("380x150")
-        self.resizable(False, False)
-        
-        # Поверх родительского окна и блокировка
-        self.transient(parent)
-        self.grab_set()
-        
-        parent.update_idletasks()
-        x = parent.winfo_x() + (parent.winfo_width() - 380) // 2
-        y = parent.winfo_y() + (parent.winfo_height() - 150) // 2
-        self.geometry(f"+{x}+{y}")
-        
-        self.protocol("WM_DELETE_WINDOW", self.on_cancel)
-        
-        self.lbl_status = ctk.CTkLabel(
-            self, 
-            text=parent.loc("dialog_scan_finding"), 
-            font=ctk.CTkFont(size=12)
-        )
-        self.lbl_status.pack(pady=(20, 10), padx=20, anchor="w")
-        
-        self.progress_bar = ctk.CTkProgressBar(self, height=14, corner_radius=7)
-        self.progress_bar.pack(fill="x", padx=20, pady=5)
-        self.progress_bar.set(0)
-        
-        self.btn_cancel = ctk.CTkButton(
-            self, 
-            text=parent.loc("dialog_scan_cancel"), 
-            command=self.on_cancel,
-            fg_color="gray", 
-            hover_color="darkgray"
-        )
-        self.btn_cancel.pack(pady=(15, 10))
-        
+        self.setWindowTitle(parent.loc("dialog_scan_title"))
+        self.setFixedSize(380, 150)
+        self.setModal(True)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        self.lbl_status = QLabel(parent.loc("dialog_scan_finding"), self)
+        self.lbl_status.setStyleSheet("font-size: 13px; color: #E0E0E0;")
+        layout.addWidget(self.lbl_status)
+
+        self.progress_bar = QProgressBar(self)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setFixedHeight(16)
+        layout.addWidget(self.progress_bar)
+
+        self.btn_cancel = QPushButton(parent.loc("dialog_scan_cancel"), self)
+        self.btn_cancel.clicked.connect(self.on_cancel)
+        self.btn_cancel.setStyleSheet("background-color: #4B5563; color: white; min-width: 100px;")
+        layout.addWidget(self.btn_cancel, alignment=Qt.AlignmentFlag.AlignCenter)
+
     def update_progress(self, current: int, total: int) -> None:
         if total > 0:
             prog = current / total
-            self.progress_bar.set(prog)
             pct = int(prog * 100)
-            self.lbl_status.configure(
-                text=self.parent.loc("dialog_scan_progress", current, total, pct)
+            self.progress_bar.setValue(pct)
+            self.lbl_status.setText(
+                self.parent.loc("dialog_scan_progress", current, total, pct)
             )
 
     def on_cancel(self) -> None:
         self.stop_event.set()
-        self.destroy()
+        self.reject()
 
 
-class DicomSplitterApp(ctk.CTk):
-    """Главный класс графического интерфейса приложения DICOM TPS Harmonizer."""
+class DicomSplitterApp(QMainWindow):
+    """Главный класс графического интерфейса приложения DICOM TPS Harmonizer на PyQt6."""
 
     def __init__(self) -> None:
         super().__init__()
-        
-        self.title("DICOM TPS Harmonizer")
-        
+
+        self.setWindowTitle("DICOM TPS Harmonizer")
+
         # Определение путей к ресурсам относительно корня проекта с поддержкой PyInstaller
         if getattr(sys, "frozen", False):
-            project_root = Path(sys._MEIPASS)
+            self.project_root = Path(sys._MEIPASS)
         else:
-            project_root = Path(__file__).resolve().parents[2]
-        theme_path = project_root / "themes" / "deep_dark.json"
-        icon_path = project_root / "themes" / "app_icon.ico"
+            self.project_root = Path(__file__).resolve().parents[2]
         
-        # Установка темы
-        if theme_path.exists():
-            ctk.set_default_color_theme(str(theme_path))
-            
-        # Установка иконки приложения
+        icon_path = self.project_root / "themes" / "app_icon.ico"
         if icon_path.exists():
-            try:
-                self.iconbitmap(str(icon_path))
-            except Exception:
-                pass
+            self.setWindowIcon(QIcon(str(icon_path)))
 
-        width, height = 1100, 720
-        self.minimum_width = 1000
-        self.minimum_height = 620
-        self.minsize(self.minimum_width, self.minimum_height)
-        
-        # Центрирование окна на экране при запуске
-        screen_width = self.winfo_screenwidth()
-        screen_height = self.winfo_screenheight()
-        x = (screen_width - width) // 2
-        y = (screen_height - height) // 2
-        self.geometry(f"{width}x{height}+{x}+{y}")
+        self.setMinimumSize(1000, 640)
+        self.resize(1100, 720)
 
-        # Очередь для вывода логов и прогресса из фонового потока
-        self.log_queue: queue.Queue[tuple[str, Any, Any] | tuple[str, Any]] = queue.Queue()
-        
-        # Загрузка путей (с поддержкой AppData и плейсхолдеров при первом запуске)
+        # Инициализация моста сигналов
+        self.bridge = QtSignalBridge()
+        self.bridge.log_signal.connect(self.add_log)
+        self.bridge.progress_signal.connect(self.update_progress)
+        self.bridge.scan_progress_signal.connect(self.update_scan_progress)
+        self.bridge.tree_scanned_signal.connect(self.on_tree_scanned)
+        self.bridge.finished_signal.connect(self.on_processing_finished)
+
+        # Загрузка путей и языка
         saved_input, saved_output, saved_lang = self.load_last_paths()
         self.current_lang = saved_lang
         
-        # Загрузка перевода
         self.translations: dict[str, str] = {}
         self.load_locale(self.current_lang)
 
-        # Переводим плейсхолдеры, если они русские, а язык выбран английский
+        # Переводим плейсхолдеры
         if self.current_lang == "en":
             if saved_input == "Введите путь для папки Dicom_input":
                 saved_input = self.loc("placeholder_input")
             if saved_output == "Введите путь для папки Dicom_output":
                 saved_output = self.loc("placeholder_output")
 
-        self.input_dir_var = ctk.StringVar(value=saved_input)
-        self.output_dir_var = ctk.StringVar(value=saved_output)
-        
-        # Переменные для чекбоксов настроек
-        self.new_uids_var = ctk.BooleanVar(value=True)
-        self.split_multiframe_var = ctk.BooleanVar(value=True)
-        self.clean_tags_var = ctk.BooleanVar(value=True)
-        self.default_tags_var = ctk.BooleanVar(value=True)
-        self.explicit_vr_var = ctk.BooleanVar(value=True)
-        self.exclude_reports_var = ctk.BooleanVar(value=True)
-        self.split_series_var = ctk.BooleanVar(value=True)
+        self.saved_input_path = saved_input
+        self.saved_output_path = saved_output
 
         self.is_processing = False
         self.stop_event = threading.Event()
-        
+        self._is_updating_tree = False
+        self.scan_dialog = None
+
         # Создание интерфейса
         self.create_widgets()
-        
-        # Запуск таймера для чтения логов из очереди в главном потоке
-        self.after(100, self.update_log_queue)
+        self.apply_styles()
+        self.update_locale_texts()
 
     def get_config_path(self) -> Path:
         """Возвращает путь к файлу конфигурации в AppData пользователя."""
@@ -443,10 +262,6 @@ class DicomSplitterApp(ctk.CTk):
         return config_dir / "config.json"
 
     def load_last_paths(self) -> tuple[str, str, str]:
-        """Загружает последние выбранные пути и язык.
-        
-        Если конфига нет (первый запуск), возвращает плейсхолдеры и русский язык.
-        """
         config_file = self.get_config_path()
         inp = "Введите путь для папки Dicom_input"
         out = "Введите путь для папки Dicom_output"
@@ -470,9 +285,8 @@ class DicomSplitterApp(ctk.CTk):
         return inp, out, lang
 
     def save_last_paths(self) -> None:
-        """Сохраняет текущие пути и язык в файл конфигурации."""
-        inp = self.input_dir_var.get()
-        out = self.output_dir_var.get()
+        inp = self.input_entry.text()
+        out = self.output_entry.text()
         lang = self.current_lang
         
         config_data = {}
@@ -499,7 +313,6 @@ class DicomSplitterApp(ctk.CTk):
             pass
 
     def load_locale(self, lang: str) -> None:
-        """Загружает файл локализации из папки locales."""
         if getattr(sys, "frozen", False):
             locales_dir = Path(sys._MEIPASS) / "locales"
         else:
@@ -516,7 +329,6 @@ class DicomSplitterApp(ctk.CTk):
             self.translations = {}
 
     def loc(self, key: str, *args) -> str:
-        """Возвращает строку перевода по ключу."""
         val = self.translations.get(key, key)
         if args:
             try:
@@ -526,94 +338,484 @@ class DicomSplitterApp(ctk.CTk):
         return val
 
     def change_language(self, lang: str) -> None:
-        """Обработчик переключения языка."""
         self.current_lang = lang
         self.load_locale(lang)
         
-        inp = self.input_dir_var.get()
-        out = self.output_dir_var.get()
+        inp = self.input_entry.text()
+        out = self.output_entry.text()
         
         if inp in ["Введите путь для папки Dicom_input", "Enter path for Dicom_input folder"]:
-            self.input_dir_var.set(self.loc("placeholder_input"))
+            self.input_entry.setText(self.loc("placeholder_input"))
         if out in ["Введите путь для папки Dicom_output", "Enter path for Dicom_output folder"]:
-            self.output_dir_var.set(self.loc("placeholder_output"))
+            self.output_entry.setText(self.loc("placeholder_output"))
             
         self.update_locale_texts()
         self.save_last_paths()
+        
+        # Обновляем оформление кнопок переключения
+        if lang == "ru":
+            self.btn_lang_ru.setStyleSheet("border: 2px solid #3B82F6; background-color: #2D2D2D; padding: 2px; border-radius: 4px;")
+            self.btn_lang_en.setStyleSheet("border: 1px solid #4B5563; background-color: transparent; padding: 2px; border-radius: 4px;")
+        else:
+            self.btn_lang_ru.setStyleSheet("border: 1px solid #4B5563; background-color: transparent; padding: 2px; border-radius: 4px;")
+            self.btn_lang_en.setStyleSheet("border: 2px solid #3B82F6; background-color: #2D2D2D; padding: 2px; border-radius: 4px;")
 
     def update_locale_texts(self) -> None:
-        """Обновляет все тексты виджетов на текущий выбранный язык."""
-        self.title(self.loc("title"))
+        self.setWindowTitle(self.loc("title"))
+        self.title_label.setText(self.loc("title"))
+        self.input_label.setText(self.loc("input_folder"))
+        self.output_label.setText(self.loc("output_folder"))
+        self.btn_browse_in.setText(self.loc("browse"))
+        self.btn_browse_out.setText(self.loc("browse"))
+        self.settings_title.setText(self.loc("optimization_params"))
         
-        if hasattr(self, "title_label"):
-            self.title_label.configure(text=self.loc("title"))
-        if hasattr(self, "input_label"):
-            self.input_label.configure(text=self.loc("input_folder"))
-        if hasattr(self, "output_label"):
-            self.output_label.configure(text=self.loc("output_folder"))
-        if hasattr(self, "input_browse_btn"):
-            self.input_browse_btn.configure(text=self.loc("browse"))
-        if hasattr(self, "output_browse_btn"):
-            self.output_browse_btn.configure(text=self.loc("browse"))
-        if hasattr(self, "settings_title"):
-            self.settings_title.configure(text=self.loc("optimization_params"))
-        if hasattr(self, "cb_new_uids"):
-            self.cb_new_uids.configure(text=self.loc("generate_uids"))
-        if hasattr(self, "cb_split_mf"):
-            self.cb_split_mf.configure(text=self.loc("split_multiframe"))
-        if hasattr(self, "cb_clean_tags"):
-            self.cb_clean_tags.configure(text=self.loc("clean_tags"))
-        if hasattr(self, "cb_default_tags"):
-            self.cb_default_tags.configure(text=self.loc("fill_mandatory"))
-        if hasattr(self, "cb_explicit_vr"):
-            self.cb_explicit_vr.configure(text=self.loc("write_explicit"))
-        if hasattr(self, "cb_exclude_reports"):
-            self.cb_exclude_reports.configure(text=self.loc("exclude_reports"))
-        if hasattr(self, "cb_split_series"):
-            self.cb_split_series.configure(text=self.loc("split_series"))
-        if hasattr(self, "sidebar_title"):
-            self.sidebar_title.configure(text=self.loc("patient_explorer"))
-        if hasattr(self, "scan_btn") and self.scan_btn.cget("text") not in [self.loc("tree_loading"), "Scanning..."]:
-            self.scan_btn.configure(text=self.loc("scan_input"))
-        if hasattr(self, "selection_label"):
-            self.on_tree_selection_change()
-        if hasattr(self, "log_title"):
-            self.log_title.configure(text=self.loc("log_title"))
-            
-        if hasattr(self, "percent_label"):
-            txt = self.percent_label.cget("text")
-            if "Обработка" in txt or "Processing" in txt:
-                try:
-                    pct = [int(s) for s in txt.split() if s.replace('%','').isdigit()][0]
-                    self.percent_label.configure(text=self.loc("processing", pct))
-                except Exception:
-                    self.percent_label.configure(text=self.loc("processing", 0))
-            elif "Остановка" in txt or "Stopping" in txt:
-                self.percent_label.configure(text=self.loc("stopping"))
-            else:
-                if "Готов" in txt or "Ready" in txt:
-                    self.percent_label.configure(text=self.loc("ready"))
-                elif "обработка остановлена" in txt or "processing stopped" in txt:
-                    self.percent_label.configure(text=self.loc("finished_stopped"))
-                else:
-                    self.percent_label.configure(text=self.loc("finished"))
+        self.cb_new_uids.setText(self.loc("generate_uids"))
+        self.cb_split_mf.setText(self.loc("split_multiframe"))
+        self.cb_clean_tags.setText(self.loc("clean_tags"))
+        self.cb_default_tags.setText(self.loc("fill_mandatory"))
+        self.cb_explicit_vr.setText(self.loc("write_explicit"))
+        self.cb_exclude_reports.setText(self.loc("exclude_reports"))
+        self.cb_split_series.setText(self.loc("split_series"))
+        
+        self.sidebar_title.setText(self.loc("patient_explorer"))
+        self.scan_btn.setText(self.loc("scan_input"))
+        self.log_title.setText(self.loc("log_title"))
+        
+        self.update_selection_label()
 
-        if hasattr(self, "start_btn"):
-            if self.is_processing:
-                if self.stop_event.is_set():
-                    self.start_btn.configure(text=self.loc("status_stopping"))
-                else:
-                    self.start_btn.configure(text=self.loc("stop_optimization"))
+        if self.is_processing:
+            if self.stop_event.is_set():
+                self.start_btn.setText(self.loc("status_stopping"))
             else:
-                self.start_btn.configure(text=self.loc("run_optimization"))
+                self.start_btn.setText(self.loc("stop_optimization"))
+        else:
+            self.start_btn.setText(self.loc("run_optimization"))
+
+    def create_widgets(self) -> None:
+        # Главный контейнер
+        central_widget = QWidget(self)
+        self.setCentralWidget(central_widget)
+
+        main_layout = QHBoxLayout(central_widget)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # ----------------------------------------------------
+        # 1. Левая боковая панель (Проводник пациентов)
+        # ----------------------------------------------------
+        self.sidebar_frame = QFrame(self)
+        self.sidebar_frame.setObjectName("sidebar")
+        self.sidebar_frame.setFixedWidth(320)
+        
+        sidebar_layout = QVBoxLayout(self.sidebar_frame)
+        sidebar_layout.setContentsMargins(15, 15, 15, 15)
+        sidebar_layout.setSpacing(10)
+
+        # Заголовок боковой панели и кнопка "Сканировать"
+        title_layout = QHBoxLayout()
+        self.sidebar_title = QLabel(self)
+        self.sidebar_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #FFFFFF;")
+        title_layout.addWidget(self.sidebar_title)
+
+        self.scan_btn = QPushButton(self)
+        self.scan_btn.clicked.connect(self.run_input_scan)
+        self.scan_btn.setStyleSheet("font-weight: bold; min-width: 90px;")
+        title_layout.addWidget(self.scan_btn)
+        
+        sidebar_layout.addLayout(title_layout)
+
+        # Дерево QTreeWidget
+        self.tree_widget = QTreeWidget(self)
+        self.tree_widget.setHeaderHidden(True)
+        self.tree_widget.itemChanged.connect(self.on_item_changed)
+        sidebar_layout.addWidget(self.tree_widget)
+
+        # Метка статуса выбора
+        self.selection_label = QLabel(self)
+        self.selection_label.setStyleSheet("font-size: 11px; font-weight: bold; color: #A0A0A0;")
+        sidebar_layout.addWidget(self.selection_label)
+
+        main_layout.addWidget(self.sidebar_frame)
+
+        # ----------------------------------------------------
+        # 2. Правая основная панель
+        # ----------------------------------------------------
+        self.content_frame = QFrame(self)
+        content_layout = QVBoxLayout(self.content_frame)
+        content_layout.setContentsMargins(20, 15, 20, 15)
+        content_layout.setSpacing(12)
+
+        # Верхняя панель (Заголовок и Языковой переключатель)
+        top_layout = QHBoxLayout()
+        self.title_label = QLabel(self)
+        self.title_label.setStyleSheet("font-size: 20px; font-weight: bold; color: #FFFFFF;")
+        top_layout.addWidget(self.title_label)
+
+        # Языковой переключатель на флагах
+        lang_layout = QHBoxLayout()
+        lang_layout.setSpacing(5)
+
+        resources_dir = self.project_root / "themes"
+        px_ru = QPixmap(str(resources_dir / "ru_flag.png"))
+        px_en = QPixmap(str(resources_dir / "gb_flag.png"))
+
+        self.btn_lang_ru = QPushButton(self)
+        self.btn_lang_ru.setIcon(QIcon(px_ru))
+        self.btn_lang_ru.setIconSize(QSize(24, 16))
+        self.btn_lang_ru.setFixedSize(32, 24)
+        self.btn_lang_ru.clicked.connect(lambda: self.change_language("ru"))
+
+        self.btn_lang_en = QPushButton(self)
+        self.btn_lang_en.setIcon(QIcon(px_en))
+        self.btn_lang_en.setIconSize(QSize(24, 16))
+        self.btn_lang_en.setFixedSize(32, 24)
+        self.btn_lang_en.clicked.connect(lambda: self.change_language("en"))
+
+        # Установка рамки на активный язык при запуске
+        if self.current_lang == "ru":
+            self.btn_lang_ru.setStyleSheet("border: 2px solid #3B82F6; background-color: #2D2D2D; padding: 2px; border-radius: 4px;")
+            self.btn_lang_en.setStyleSheet("border: 1px solid #4B5563; background-color: transparent; padding: 2px; border-radius: 4px;")
+        else:
+            self.btn_lang_ru.setStyleSheet("border: 1px solid #4B5563; background-color: transparent; padding: 2px; border-radius: 4px;")
+            self.btn_lang_en.setStyleSheet("border: 2px solid #3B82F6; background-color: #2D2D2D; padding: 2px; border-radius: 4px;")
+
+        lang_layout.addWidget(self.btn_lang_ru)
+        lang_layout.addWidget(self.btn_lang_en)
+        top_layout.addLayout(lang_layout)
+        
+        content_layout.addLayout(top_layout)
+
+        # Группа 1: Выбор папок
+        folder_frame = QFrame(self)
+        folder_frame.setObjectName("groupFrame")
+        folder_layout = QGridLayout(folder_frame)
+        folder_layout.setContentsMargins(15, 15, 15, 15)
+        folder_layout.setSpacing(10)
+
+        # Иконки кнопок папок
+        self.img_create = QIcon(str(resources_dir / "create_folder.png"))
+        self.img_open_in = QIcon(str(resources_dir / "open_folder_input.png"))
+        self.img_open_out = QIcon(str(resources_dir / "open_folder_output.png"))
+
+        # Папка ввода
+        self.btn_create_in = QPushButton(self)
+        self.btn_create_in.setIcon(self.img_create)
+        self.btn_create_in.setFixedSize(30, 30)
+        self.btn_create_in.clicked.connect(lambda: self.ask_and_create_folder("input"))
+        folder_layout.addWidget(self.btn_create_in, 0, 0)
+
+        self.input_label = QLabel(self)
+        self.input_label.setStyleSheet("font-weight: bold; color: #FFFFFF;")
+        folder_layout.addWidget(self.input_label, 0, 1)
+
+        self.input_entry = QLineEdit(self)
+        self.input_entry.setText(self.saved_input_path)
+        folder_layout.addWidget(self.input_entry, 0, 2)
+
+        self.btn_open_in = QPushButton(self)
+        self.btn_open_in.setIcon(self.img_open_in)
+        self.btn_open_in.setFixedSize(30, 30)
+        self.btn_open_in.clicked.connect(self.open_input_dir)
+        folder_layout.addWidget(self.btn_open_in, 0, 3)
+
+        self.btn_browse_in = QPushButton(self)
+        self.btn_browse_in.clicked.connect(self.browse_input)
+        self.btn_browse_in.setFixedWidth(100)
+        folder_layout.addWidget(self.btn_browse_in, 0, 4)
+
+        # Папка вывода
+        self.btn_create_out = QPushButton(self)
+        self.btn_create_out.setIcon(self.img_create)
+        self.btn_create_out.setFixedSize(30, 30)
+        self.btn_create_out.clicked.connect(lambda: self.ask_and_create_folder("output"))
+        folder_layout.addWidget(self.btn_create_out, 1, 0)
+
+        self.output_label = QLabel(self)
+        self.output_label.setStyleSheet("font-weight: bold; color: #FFFFFF;")
+        folder_layout.addWidget(self.output_label, 1, 1)
+
+        self.output_entry = QLineEdit(self)
+        self.output_entry.setText(self.saved_output_path)
+        folder_layout.addWidget(self.output_entry, 1, 2)
+
+        self.btn_open_out = QPushButton(self)
+        self.btn_open_out.setIcon(self.img_open_out)
+        self.btn_open_out.setFixedSize(30, 30)
+        self.btn_open_out.clicked.connect(self.open_output_dir)
+        folder_layout.addWidget(self.btn_open_out, 1, 3)
+
+        self.btn_browse_out = QPushButton(self)
+        self.btn_browse_out.clicked.connect(self.browse_output)
+        self.btn_browse_out.setFixedWidth(100)
+        folder_layout.addWidget(self.btn_browse_out, 1, 4)
+
+        content_layout.addWidget(folder_frame)
+
+        # Группа 2: Настройки оптимизации
+        settings_frame = QFrame(self)
+        settings_frame.setObjectName("groupFrame")
+        settings_layout = QGridLayout(settings_frame)
+        settings_layout.setContentsMargins(15, 15, 15, 15)
+        settings_layout.setSpacing(10)
+
+        self.settings_title = QLabel(self)
+        self.settings_title.setStyleSheet("font-size: 13px; font-weight: bold; color: #FFFFFF;")
+        settings_layout.addWidget(self.settings_title, 0, 0, 1, 2)
+
+        self.cb_new_uids = QCheckBox(self)
+        self.cb_new_uids.setChecked(True)
+        settings_layout.addWidget(self.cb_new_uids, 1, 0)
+
+        self.cb_split_mf = QCheckBox(self)
+        self.cb_split_mf.setChecked(True)
+        settings_layout.addWidget(self.cb_split_mf, 1, 1)
+
+        self.cb_clean_tags = QCheckBox(self)
+        self.cb_clean_tags.setChecked(True)
+        settings_layout.addWidget(self.cb_clean_tags, 2, 0)
+
+        self.cb_default_tags = QCheckBox(self)
+        self.cb_default_tags.setChecked(True)
+        settings_layout.addWidget(self.cb_default_tags, 2, 1)
+
+        self.cb_explicit_vr = QCheckBox(self)
+        self.cb_explicit_vr.setChecked(True)
+        settings_layout.addWidget(self.cb_explicit_vr, 3, 0)
+
+        self.cb_exclude_reports = QCheckBox(self)
+        self.cb_exclude_reports.setChecked(True)
+        settings_layout.addWidget(self.cb_exclude_reports, 3, 1)
+
+        self.cb_split_series = QCheckBox(self)
+        self.cb_split_series.setChecked(True)
+        settings_layout.addWidget(self.cb_split_series, 4, 0)
+
+        content_layout.addWidget(settings_frame)
+
+        # Группа 3: Лог выполнения
+        log_frame = QFrame(self)
+        log_frame.setObjectName("groupFrame")
+        log_layout = QVBoxLayout(log_frame)
+        log_layout.setContentsMargins(15, 15, 15, 15)
+        log_layout.setSpacing(8)
+
+        self.log_title = QLabel(self)
+        self.log_title.setStyleSheet("font-size: 13px; font-weight: bold; color: #FFFFFF;")
+        log_layout.addWidget(self.log_title)
+
+        self.log_textbox = QTextEdit(self)
+        self.log_textbox.setReadOnly(True)
+        self.log_textbox.setFont(QFont("Consolas", 10))
+        log_layout.addWidget(self.log_textbox)
+
+        content_layout.addWidget(log_frame)
+
+        # Группа 4: Прогресс и Кнопка пуска
+        control_frame = QFrame(self)
+        control_layout = QVBoxLayout(control_frame)
+        control_layout.setContentsMargins(0, 0, 0, 0)
+        control_layout.setSpacing(8)
+
+        self.progress_bar = QProgressBar(self)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setFixedHeight(18)
+        control_layout.addWidget(self.progress_bar)
+
+        self.percent_label = QLabel(self)
+        self.percent_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.percent_label.setStyleSheet("font-size: 11px; font-weight: bold; color: #FFFFFF;")
+        control_layout.addWidget(self.percent_label)
+
+        self.start_btn = QPushButton(self)
+        self.start_btn.setObjectName("startBtn")
+        self.start_btn.setFixedHeight(40)
+        self.start_btn.clicked.connect(self.start_processing)
+        control_layout.addWidget(self.start_btn)
+
+        content_layout.addLayout(control_layout)
+
+        main_layout.addWidget(self.content_frame)
+
+    def apply_styles(self) -> None:
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #121212;
+            }
+            QWidget {
+                color: #D1D5DB;
+                font-family: "Segoe UI", Arial, sans-serif;
+            }
+            #sidebar {
+                background-color: #1A1A1A;
+                border-right: 1px solid #2D2D2D;
+            }
+            #groupFrame {
+                background-color: #1A1A1A;
+                border: 1px solid #2D2D2D;
+                border-radius: 8px;
+            }
+            QTreeWidget {
+                background-color: #121212;
+                border: 1px solid #2D2D2D;
+                border-radius: 6px;
+                padding: 5px;
+            }
+            QTreeWidget::item {
+                padding: 6px 4px;
+                color: #E5E7EB;
+            }
+            QTreeWidget::item:hover {
+                background-color: #2A2A2A;
+                border-radius: 4px;
+            }
+            QTreeWidget::item:selected {
+                background-color: #3B82F6;
+                color: #FFFFFF;
+                border-radius: 4px;
+            }
+            QPushButton {
+                background-color: #2A2A2A;
+                border: 1px solid #374151;
+                border-radius: 6px;
+                padding: 6px 12px;
+                font-size: 12px;
+                color: #E5E7EB;
+            }
+            QPushButton:hover {
+                background-color: #374151;
+                border-color: #4B5563;
+            }
+            QPushButton:pressed {
+                background-color: #1F2937;
+            }
+            QPushButton#startBtn {
+                background-color: #2563EB;
+                color: #FFFFFF;
+                font-size: 13px;
+                font-weight: bold;
+                border: none;
+            }
+            QPushButton#startBtn:hover {
+                background-color: #3B82F6;
+            }
+            QPushButton#startBtn:pressed {
+                background-color: #1D4ED8;
+            }
+            QPushButton#stopBtn {
+                background-color: #EF4444;
+                color: #FFFFFF;
+                font-size: 13px;
+                font-weight: bold;
+                border: none;
+            }
+            QPushButton#stopBtn:hover {
+                background-color: #F87171;
+            }
+            QPushButton#stopBtn:pressed {
+                background-color: #B91C1C;
+            }
+            QLineEdit {
+                background-color: #121212;
+                border: 1px solid #2D2D2D;
+                border-radius: 6px;
+                padding: 6px 10px;
+                color: #F3F4F6;
+            }
+            QLineEdit:focus {
+                border-color: #3B82F6;
+            }
+            QTextEdit {
+                background-color: #121212;
+                border: 1px solid #2D2D2D;
+                border-radius: 6px;
+                color: #E5E7EB;
+            }
+            QProgressBar {
+                background-color: #1A1A1A;
+                border: 1px solid #2D2D2D;
+                border-radius: 9px;
+                text-align: center;
+                color: #FFFFFF;
+                font-weight: bold;
+                font-size: 11px;
+            }
+            QProgressBar::chunk {
+                background-color: #2563EB;
+                border-radius: 8px;
+            }
+            QCheckBox {
+                spacing: 8px;
+                color: #D1D5DB;
+            }
+            QCheckBox::indicator {
+                width: 16px;
+                height: 16px;
+                border: 1px solid #4B5563;
+                border-radius: 4px;
+                background-color: #121212;
+            }
+            QCheckBox::indicator:hover {
+                border-color: #3B82F6;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #2563EB;
+                border-color: #2563EB;
+            }
+        """)
+
+    # Методы обзора и открытия папок
+    def browse_input(self) -> None:
+        initial = self.input_entry.text()
+        if "Введите путь" in initial or "Enter path" in initial:
+            initial = ""
+        dir_path = QFileDialog.getExistingDirectory(self, "Select Input Directory", initial)
+        if dir_path:
+            self.input_entry.setText(str(Path(dir_path).resolve()))
+            self.save_last_paths()
+
+    def browse_output(self) -> None:
+        initial = self.output_entry.text()
+        if "Введите путь" in initial or "Enter path" in initial:
+            initial = ""
+        dir_path = QFileDialog.getExistingDirectory(self, "Select Output Directory", initial)
+        if dir_path:
+            self.output_entry.setText(str(Path(dir_path).resolve()))
+            self.save_last_paths()
+
+    def open_input_dir(self) -> None:
+        inp_dir = self.input_entry.text()
+        if "Введите путь" in inp_dir or "Enter path" in inp_dir:
+            self.bridge.log_signal.emit(self.loc("error_input_path_not_set"), "error")
+            return
+            
+        path = Path(inp_dir)
+        if path.exists():
+            import os
+            os.startfile(path)
+        else:
+            self.bridge.log_signal.emit(self.loc("error_input_not_exist_warning", path), "warning")
+
+    def open_output_dir(self) -> None:
+        out_dir = self.output_entry.text()
+        if "Введите путь" in out_dir or "Enter path" in out_dir:
+            self.bridge.log_signal.emit(self.loc("error_output_path_not_set"), "error")
+            return
+            
+        path = Path(out_dir)
+        if path.exists():
+            import os
+            os.startfile(path)
+        else:
+            self.bridge.log_signal.emit(self.loc("error_output_not_exist", path), "warning")
 
     def ask_and_create_folder(self, dir_type: str) -> None:
-        """Запрашивает пользователя и создает соответствующую папку."""
         folder_name = "Dicom_input" if dir_type == "input" else "Dicom_output"
         message = self.loc("ask_create_folder", folder_name)
         
         dialog = CustomQuestionDialog(self, self.loc("dialog_title"), message)
-        result = dialog.result
+        dialog.exec()
+        result = dialog.result_value
         
         if not result or result == "no":
             return
@@ -631,485 +833,284 @@ class DicomSplitterApp(ctk.CTk):
             try:
                 target_path.mkdir(parents=True, exist_ok=True)
                 if dir_type == "input":
-                    self.input_dir_var.set(str(target_path.resolve()))
+                    self.input_entry.setText(str(target_path.resolve()))
                 else:
-                    self.output_dir_var.set(str(target_path.resolve()))
-                self.log_queue.put(("log", self.loc("folder_created", target_path.resolve()), "success"))
+                    self.output_entry.setText(str(target_path.resolve()))
+                self.bridge.log_signal.emit(self.loc("folder_created", target_path.resolve()), "success")
             except Exception as e:
-                self.log_queue.put(("log", self.loc("error_create_folder", e), "error"))
+                self.bridge.log_signal.emit(self.loc("error_create_folder", e), "error")
                 
         elif result == "both":
             try:
                 input_path.mkdir(parents=True, exist_ok=True)
                 output_path.mkdir(parents=True, exist_ok=True)
-                self.input_dir_var.set(str(input_path.resolve()))
-                self.output_dir_var.set(str(output_path.resolve()))
-                self.log_queue.put(("log", self.loc("folders_created_both", input_path.resolve(), output_path.resolve()), "success"))
+                self.input_entry.setText(str(input_path.resolve()))
+                self.output_entry.setText(str(output_path.resolve()))
+                self.bridge.log_signal.emit(self.loc("folders_created_both", input_path.resolve(), output_path.resolve()), "success")
             except Exception as e:
-                self.log_queue.put(("log", self.loc("error_create_folders_both", e), "error"))
+                self.bridge.log_signal.emit(self.loc("error_create_folders_both", e), "error")
                 
         self.save_last_paths()
 
-    def create_widgets(self) -> None:
-        """Инициализирует и позиционирует все виджеты на форме."""
-        # Главный макет: 2 колонки (Проводник слева, настройки/логи справа)
-        self.grid_rowconfigure(0, weight=1)
-        self.grid_columnconfigure(0, weight=0, minsize=320)
-        self.grid_columnconfigure(1, weight=1)
+    # Методы обработки сигналов от процессора
+    def add_log(self, text: str, tag: str) -> None:
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        color = "white"
+        if tag == "warning":
+            color = "#ffb347"
+        elif tag == "error":
+            color = "#ff6961"
+        elif tag == "success":
+            color = "#77dd77"
+        formatted_text = f"<span style='color:#a0a0a0;'>[{timestamp}]</span> <span style='color:{color};'>{text}</span>"
+        self.log_textbox.append(formatted_text)
 
-        # 1. Левая боковая панель (Проводник пациентов)
-        self.sidebar_frame = ctk.CTkFrame(self, width=320, corner_radius=0)
-        self.sidebar_frame.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
-        self.sidebar_frame.grid_rowconfigure(1, weight=1)
-        self.sidebar_frame.grid_columnconfigure(0, weight=1)
+    def update_progress(self, current: int, total: int) -> None:
+        if total > 0:
+            prog = current / total
+            pct = int(prog * 100)
+            self.progress_bar.setValue(pct)
+            if self.is_processing and not self.stop_event.is_set():
+                self.percent_label.setText(self.loc("processing", pct))
 
-        # Заголовок проводника
-        self.sidebar_title = ctk.CTkLabel(
-            self.sidebar_frame,
-            text=self.loc("patient_explorer"),
-            font=ctk.CTkFont(family="Segoe UI", size=18, weight="bold")
-        )
-        self.sidebar_title.grid(row=0, column=0, padx=15, pady=(15, 5), sticky="w")
+    def update_scan_progress(self, current: int, total: int) -> None:
+        if self.scan_dialog:
+            self.scan_dialog.update_progress(current, total)
 
-        # Кнопка сканирования
-        self.scan_btn = ctk.CTkButton(
-            self.sidebar_frame,
-            text=self.loc("scan_input"),
-            font=ctk.CTkFont(weight="bold"),
-            width=90,
-            command=self.run_input_scan
-        )
-        self.scan_btn.grid(row=0, column=0, padx=15, pady=(15, 5), sticky="e")
+    def on_processing_finished(self) -> None:
+        self.is_processing = False
+        self.start_btn.setObjectName("startBtn")
+        self.start_btn.setText(self.loc("run_optimization"))
+        self.start_btn.setEnabled(True)
+        self.apply_styles() # Обновит стиль (вернет синий цвет кнопки)
 
-        # Дерево пациентов
-        self.tree_view = CTkPatientTree(
-            self.sidebar_frame,
-            on_selection_change=self.on_tree_selection_change,
-            fg_color=("#F3F4F6", "#1F1F1F")
-        )
-        self.tree_view.grid(row=1, column=0, padx=15, pady=10, sticky="nsew")
-
-        # Метка статуса выбора
-        self.selection_label = ctk.CTkLabel(
-            self.sidebar_frame,
-            text=f"{self.loc('selected_for_processing')}: 0",
-            font=ctk.CTkFont(size=11, weight="bold")
-        )
-        self.selection_label.grid(row=2, column=0, padx=15, pady=(0, 15), sticky="w")
-
-        # 2. Правая основная панель (контейнер для существующих элементов)
-        self.main_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.main_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
-        self.main_frame.grid_rowconfigure(3, weight=1)  # Лог-бокс растягивается
-        self.main_frame.grid_columnconfigure(0, weight=1)
-        
-        # Загрузка иконок для кнопок и переключателя
-        if getattr(sys, "frozen", False):
-            resources_dir = Path(sys._MEIPASS) / "themes"
+        if self.stop_event.is_set():
+            self.percent_label.setText(self.loc("finished_stopped"))
         else:
-            resources_dir = Path(__file__).resolve().parents[2] / "themes"
+            self.percent_label.setText(self.loc("finished"))
+        self.set_gui_enabled(True)
+
+    def on_tree_scanned(self, tree_data: dict) -> None:
+        self.populate_tree(tree_data)
+        self.scan_btn.setEnabled(True)
+        self.scan_btn.setText(self.loc("scan_input"))
+        self.update_selection_label()
+        if self.scan_dialog:
+            self.scan_dialog.accept()
+            self.scan_dialog = None
+
+    def set_gui_enabled(self, enabled: bool) -> None:
+        self.start_btn.setEnabled(enabled)
+
+    # Работа с QTreeWidget
+    def populate_tree(self, tree_data: dict) -> None:
+        self._is_updating_tree = True
+        self.tree_widget.clear()
+        
+        for (pat_name, pat_id), studies in sorted(tree_data.items(), key=lambda x: str(x[0])):
+            # Пациент
+            pat_label = f"{pat_name} [{pat_id}]"
+            pat_item = QTreeWidgetItem(self.tree_widget)
+            pat_item.setText(0, pat_label)
+            pat_item.setCheckState(0, Qt.CheckState.Checked)
+            pat_item.setData(0, Qt.ItemDataRole.UserRole, ("patient", pat_name, pat_id))
             
-        icon_create_path = resources_dir / "create_folder.png"
-        icon_open_in_path = resources_dir / "open_folder_input.png"
-        icon_open_out_path = resources_dir / "open_folder_output.png"
-        icon_ru_path = resources_dir / "ru_flag.png"
-        icon_gb_path = resources_dir / "gb_flag.png"
-        
-        self.img_create = ctk.CTkImage(Image.open(icon_create_path), size=(20, 20)) if icon_create_path.exists() else None
-        self.img_open_in = ctk.CTkImage(Image.open(icon_open_in_path), size=(20, 20)) if icon_open_in_path.exists() else None
-        self.img_open_out = ctk.CTkImage(Image.open(icon_open_out_path), size=(20, 20)) if icon_open_out_path.exists() else None
-        self.img_ru = ctk.CTkImage(Image.open(icon_ru_path), size=(24, 16)) if icon_ru_path.exists() else None
-        self.img_gb = ctk.CTkImage(Image.open(icon_gb_path), size=(24, 16)) if icon_gb_path.exists() else None
-
-        # 1. Заголовок и свитч
-        self.title_label = ctk.CTkLabel(
-            self.main_frame, 
-            text=self.loc("title"), 
-            font=ctk.CTkFont(family="Segoe UI", size=24, weight="bold")
-        )
-        self.title_label.grid(row=0, column=0, padx=20, pady=(20, 10), sticky="w")
-        
-        if self.img_ru and self.img_gb:
-            self.lang_switch = LanguageSwitch(
-                self.main_frame,
-                ru_image=self.img_ru,
-                gb_image=self.img_gb,
-                command=self.change_language,
-                current_lang=self.current_lang
-            )
-            self.lang_switch.grid(row=0, column=0, padx=20, pady=(20, 10), sticky="e")
-        
-        # 2. Выбор папок
-        folder_frame = ctk.CTkFrame(self.main_frame)
-        folder_frame.grid(row=1, column=0, padx=20, pady=10, sticky="nsew")
-        
-        folder_frame.grid_columnconfigure(0, weight=0)
-        folder_frame.grid_columnconfigure(1, weight=0)
-        folder_frame.grid_columnconfigure(2, weight=1)
-        folder_frame.grid_columnconfigure(3, weight=0)
-        folder_frame.grid_columnconfigure(4, weight=0)
-        
-        # Папка ввода
-        input_create_btn = ctk.CTkButton(
-            folder_frame,
-            text="",
-            image=self.img_create,
-            width=30,
-            height=30,
-            fg_color="transparent",
-            hover_color=("#E5E7EB", "#374151"),
-            command=lambda: self.ask_and_create_folder("input")
-        )
-        input_create_btn.grid(row=0, column=0, padx=(10, 5), pady=10)
-        
-        self.input_label = ctk.CTkLabel(folder_frame, text=self.loc("input_folder"), font=ctk.CTkFont(size=13, weight="bold"))
-        self.input_label.grid(row=0, column=1, padx=(5, 10), pady=10, sticky="w")
-        
-        input_entry = ctk.CTkEntry(folder_frame, textvariable=self.input_dir_var)
-        input_entry.grid(row=0, column=2, padx=10, pady=10, sticky="ew")
-        
-        input_open_btn = ctk.CTkButton(
-            folder_frame,
-            text="",
-            image=self.img_open_in,
-            width=30,
-            height=30,
-            fg_color="transparent",
-            hover_color=("#E5E7EB", "#374151"),
-            command=self.open_input_dir
-        )
-        input_open_btn.grid(row=0, column=3, padx=(5, 10), pady=10)
-        
-        self.input_browse_btn = ctk.CTkButton(folder_frame, text=self.loc("browse"), width=100, command=self.browse_input)
-        self.input_browse_btn.grid(row=0, column=4, padx=(0, 10), pady=10)
-        
-        # Папка вывода
-        output_create_btn = ctk.CTkButton(
-            folder_frame,
-            text="",
-            image=self.img_create,
-            width=30,
-            height=30,
-            fg_color="transparent",
-            hover_color=("#E5E7EB", "#374151"),
-            command=lambda: self.ask_and_create_folder("output")
-        )
-        output_create_btn.grid(row=1, column=0, padx=(10, 5), pady=(0, 10))
-        
-        self.output_label = ctk.CTkLabel(folder_frame, text=self.loc("output_folder"), font=ctk.CTkFont(size=13, weight="bold"))
-        self.output_label.grid(row=1, column=1, padx=(5, 10), pady=(0, 10), sticky="w")
-        
-        output_entry = ctk.CTkEntry(folder_frame, textvariable=self.output_dir_var)
-        output_entry.grid(row=1, column=2, padx=10, pady=(0, 10), sticky="ew")
-        
-        output_open_btn = ctk.CTkButton(
-            folder_frame,
-            text="",
-            image=self.img_open_out,
-            width=30,
-            height=30,
-            fg_color="transparent",
-            hover_color=("#E5E7EB", "#374151"),
-            command=self.open_output_dir
-        )
-        output_open_btn.grid(row=1, column=3, padx=(5, 10), pady=(0, 10))
-        
-        self.output_browse_btn = ctk.CTkButton(folder_frame, text=self.loc("browse"), width=100, command=self.browse_output)
-        self.output_browse_btn.grid(row=1, column=4, padx=(0, 10), pady=(0, 10))
-
-        # 3. Настройки (Чекбоксы)
-        settings_frame = ctk.CTkFrame(self.main_frame)
-        settings_frame.grid(row=2, column=0, padx=20, pady=10, sticky="nsew")
-        settings_frame.grid_columnconfigure((0, 1), weight=1)
-        
-        self.settings_title = ctk.CTkLabel(settings_frame, text=self.loc("optimization_params"), font=ctk.CTkFont(size=14, weight="bold"))
-        self.settings_title.grid(row=0, column=0, columnspan=2, padx=15, pady=(10, 5), sticky="w")
-        
-        self.cb_new_uids = ctk.CTkCheckBox(
-            settings_frame, 
-            text=self.loc("generate_uids"), 
-            variable=self.new_uids_var
-        )
-        self.cb_new_uids.grid(row=1, column=0, padx=15, pady=5, sticky="w")
-        
-        self.cb_split_mf = ctk.CTkCheckBox(
-            settings_frame, 
-            text=self.loc("split_multiframe"), 
-            variable=self.split_multiframe_var
-        )
-        self.cb_split_mf.grid(row=1, column=1, padx=15, pady=5, sticky="w")
-        
-        self.cb_clean_tags = ctk.CTkCheckBox(
-            settings_frame, 
-            text=self.loc("clean_tags"), 
-            variable=self.clean_tags_var
-        )
-        self.cb_clean_tags.grid(row=2, column=0, padx=15, pady=5, sticky="w")
-        
-        self.cb_default_tags = ctk.CTkCheckBox(
-            settings_frame, 
-            text=self.loc("fill_mandatory"), 
-            variable=self.default_tags_var
-        )
-        self.cb_default_tags.grid(row=2, column=1, padx=15, pady=5, sticky="w")
-        
-        self.cb_explicit_vr = ctk.CTkCheckBox(
-            settings_frame, 
-            text=self.loc("write_explicit"), 
-            variable=self.explicit_vr_var
-        )
-        self.cb_explicit_vr.grid(row=3, column=0, padx=15, pady=5, sticky="w")
-
-        self.cb_exclude_reports = ctk.CTkCheckBox(
-            settings_frame, 
-            text=self.loc("exclude_reports"), 
-            variable=self.exclude_reports_var
-        )
-        self.cb_exclude_reports.grid(row=3, column=1, padx=15, pady=5, sticky="w")
-
-        self.cb_split_series = ctk.CTkCheckBox(
-            settings_frame, 
-            text=self.loc("split_series"), 
-            variable=self.split_series_var
-        )
-        self.cb_split_series.grid(row=4, column=0, padx=15, pady=(5, 10), sticky="w")
-
-        # 4. Поле для вывода логов
-        log_frame = ctk.CTkFrame(self.main_frame)
-        log_frame.grid(row=3, column=0, padx=20, pady=10, sticky="nsew")
-        log_frame.grid_rowconfigure(1, weight=1)
-        log_frame.grid_columnconfigure(0, weight=1)
-        
-        self.log_title = ctk.CTkLabel(log_frame, text=self.loc("log_title"), font=ctk.CTkFont(size=14, weight="bold"))
-        self.log_title.grid(row=0, column=0, padx=15, pady=(10, 5), sticky="w")
-        
-        self.log_textbox = ctk.CTkTextbox(log_frame, font=ctk.CTkFont(family="Consolas", size=11))
-        self.log_textbox.grid(row=1, column=0, padx=15, pady=(0, 10), sticky="nsew")
-        self.log_textbox.configure(state="disabled")
-        
-        self.log_textbox.tag_config("info", foreground="white")
-        self.log_textbox.tag_config("warning", foreground="#ffb347")
-        self.log_textbox.tag_config("error", foreground="#ff6961")
-        self.log_textbox.tag_config("success", foreground="#77dd77")
-
-        # 5. Управление и прогресс
-        control_frame = ctk.CTkFrame(self.main_frame)
-        control_frame.grid(row=4, column=0, padx=20, pady=(0, 20), sticky="nsew")
-        
-        control_frame.grid_columnconfigure(0, weight=1)
-        control_frame.grid_rowconfigure((0, 1, 2), weight=1)
-        
-        # Прогресс-бар
-        self.progress_bar = ctk.CTkProgressBar(
-            control_frame, 
-            height=18, 
-            corner_radius=8,
-            border_width=1
-        )
-        self.progress_bar.grid(row=0, column=0, padx=15, pady=(15, 2), sticky="ew")
-        self.progress_bar.set(0)
-        
-        # Процентный индикатор под прогресс-баром
-        self.percent_label = ctk.CTkLabel(
-            control_frame, 
-            text=self.loc("ready"), 
-            font=ctk.CTkFont(size=11, weight="bold")
-        )
-        self.percent_label.grid(row=1, column=0, padx=15, pady=(0, 10), sticky="n")
-        
-        # Кнопка запуска оптимизации
-        self.start_btn = ctk.CTkButton(
-            control_frame, 
-            text=self.loc("run_optimization"), 
-            font=ctk.CTkFont(weight="bold"),
-            width=300,
-            height=40,
-            command=self.start_processing
-        )
-        self.start_btn.grid(row=2, column=0, padx=15, pady=(0, 15), sticky="n")
-
-    # Методы обзора папок
-    def browse_input(self) -> None:
-        """Открывает диалог выбора входной папки."""
-        initial = self.input_dir_var.get()
-        if "Введите путь" in initial or "Enter path" in initial:
-            initial = None
-        dir_path = filedialog.askdirectory(initialdir=initial)
-        if dir_path:
-            self.input_dir_var.set(str(Path(dir_path).resolve()))
-            self.save_last_paths()
-
-    def browse_output(self) -> None:
-        """Открывает диалог выбора папки для вывода."""
-        initial = self.output_dir_var.get()
-        if "Введите путь" in initial or "Enter path" in initial:
-            initial = None
-        dir_path = filedialog.askdirectory(initialdir=initial)
-        if dir_path:
-            self.output_dir_var.set(str(Path(dir_path).resolve()))
-            self.save_last_paths()
-
-    def open_input_dir(self) -> None:
-        """Открывает входную папку в Проводнике Windows."""
-        inp_dir = self.input_dir_var.get()
-        if "Введите путь" in inp_dir or "Enter path" in inp_dir:
-            self.log_queue.put(("log", self.loc("error_input_path_not_set"), "error"))
-            return
-            
-        path = Path(inp_dir)
-        if path.exists():
-            import os
-            os.startfile(path)
-        else:
-            self.log_queue.put(("log", self.loc("error_input_not_exist_warning", path), "warning"))
-
-    def open_output_dir(self) -> None:
-        """Открывает выходную папку в Проводнике Windows."""
-        out_dir = self.output_dir_var.get()
-        if "Введите путь" in out_dir or "Enter path" in out_dir:
-            self.log_queue.put(("log", self.loc("error_output_path_not_set"), "error"))
-            return
-            
-        path = Path(out_dir)
-        if path.exists():
-            import os
-            os.startfile(path)
-        else:
-            self.log_queue.put(("log", self.loc("error_output_not_exist", path), "warning"))
-
-    def update_log_queue(self) -> None:
-        """Периодически опрашивает очередь и безопасно обновляет виджеты в главном потоке."""
-        try:
-            while True:
-                msg = self.log_queue.get_nowait()
-                msg_type = msg[0]
+            for (study_date, study_desc, study_uid), series_dict in sorted(studies.items(), key=lambda x: str(x[0])):
+                # Исследование
+                study_label = f"{study_date} - {study_desc}" if study_date else study_desc
+                study_item = QTreeWidgetItem(pat_item)
+                study_item.setText(0, study_label)
+                study_item.setCheckState(0, Qt.CheckState.Checked)
+                study_item.setData(0, Qt.ItemDataRole.UserRole, ("study", study_uid))
                 
-                if msg_type == "log":
-                    _, text, tag = msg
-                    timestamp = datetime.now().strftime("%H:%M:%S")
-                    formatted_text = f"[{timestamp}] {text}\n"
-                    self.log_textbox.configure(state="normal")
-                    self.log_textbox.insert("end", formatted_text, tag)
-                    self.log_textbox.configure(state="disabled")
-                    self.log_textbox.yview("end")
-                    
-                elif msg_type == "progress":
-                    _, current, total = msg
-                    if total > 0:
-                        prog = current / total
-                        self.progress_bar.set(prog)
-                        if self.is_processing and not self.stop_event.is_set():
-                            self.percent_label.configure(text=self.loc("processing", int(prog * 100)))
-                            
-                elif msg_type == "scan_progress":
-                    _, current, total = msg
-                    if hasattr(self, "scan_dialog") and self.scan_dialog:
-                        try:
-                            self.scan_dialog.update_progress(current, total)
-                        except Exception:
-                            pass
+                for (series_label, s_uid, seg_idx), files in sorted(series_dict.items(), key=lambda x: str(x[0])):
+                    # Серия
+                    series_item = QTreeWidgetItem(study_item)
+                    series_item.setText(0, series_label)
+                    series_item.setCheckState(0, Qt.CheckState.Checked)
+                    # Сохраняем информацию о файлах серии
+                    series_item.setData(0, Qt.ItemDataRole.UserRole, ("series", s_uid, seg_idx, files))
 
-                elif msg_type == "finished":
-                    self.is_processing = False
-                    self.start_btn.configure(
-                        text=self.loc("run_optimization"), 
-                        fg_color=("#3B82F6", "#1D4ED8"), 
-                        hover_color=("#2563EB", "#1E40AF"),
-                        state="normal"
-                    )
-                    if self.stop_event.is_set():
-                        self.percent_label.configure(text=self.loc("finished_stopped"))
-                    else:
-                        self.percent_label.configure(text=self.loc("finished"))
-                    self.set_gui_state(True)
-                    
-                elif msg_type == "tree_scanned":
-                    _, tree_data = msg
-                    self.tree_view.populate(tree_data)
-                    self.scan_btn.configure(state="normal", text=self.loc("scan_input"))
-                    self.on_tree_selection_change()
-                    if hasattr(self, "scan_dialog") and self.scan_dialog:
-                        try:
-                            self.scan_dialog.destroy()
-                        except Exception:
-                            pass
-                        self.scan_dialog = None
+        self.tree_widget.expandAll()
+        self._is_updating_tree = False
 
-                self.log_queue.task_done()
-        except queue.Empty:
-            pass
+    def on_item_changed(self, item: QTreeWidgetItem, column: int) -> None:
+        if self._is_updating_tree:
+            return
+        
+        self._is_updating_tree = True
+        try:
+            state = item.checkState(0)
+            self._set_children_state(item, state)
+            self._update_parent_states(item)
+        finally:
+            self._is_updating_tree = False
+        
+        self.update_selection_label()
+
+    def _set_children_state(self, item: QTreeWidgetItem, state: Qt.CheckState) -> None:
+        for i in range(item.childCount()):
+            child = item.child(i)
+            child.setCheckState(0, state)
+            self._set_children_state(child, state)
+
+    def _update_parent_states(self, item: QTreeWidgetItem) -> None:
+        parent = item.parent()
+        if not parent:
+            return
             
-        self.after(100, self.update_log_queue)
+        checked_count = 0
+        unchecked_count = 0
+        
+        for i in range(parent.childCount()):
+            child = parent.child(i)
+            c_state = child.checkState(0)
+            if c_state == Qt.CheckState.Checked:
+                checked_count += 1
+            elif c_state == Qt.CheckState.Unchecked:
+                unchecked_count += 1
+                
+        if checked_count == parent.childCount():
+            parent.setCheckState(0, Qt.CheckState.Checked)
+        elif unchecked_count == parent.childCount():
+            parent.setCheckState(0, Qt.CheckState.Unchecked)
+        else:
+            parent.setCheckState(0, Qt.CheckState.PartiallyChecked)
+            
+        self._update_parent_states(parent)
 
-    def set_gui_state(self, enabled: bool) -> None:
-        """Включает или отключает интерактивные элементы управления."""
-        state = "normal" if enabled else "disabled"
-        self.start_btn.configure(state=state)
+    def get_selected_files(self) -> list:
+        selected_files = []
+        for i in range(self.tree_widget.topLevelItemCount()):
+            pat_item = self.tree_widget.topLevelItem(i)
+            for j in range(pat_item.childCount()):
+                study_item = pat_item.child(j)
+                for k in range(study_item.childCount()):
+                    series_item = study_item.child(k)
+                    if series_item.checkState(0) == Qt.CheckState.Checked:
+                        data = series_item.data(0, Qt.ItemDataRole.UserRole)
+                        if data and data[0] == "series":
+                            selected_files.extend(data[3])
+        return selected_files
 
+    def get_patient_nodes_data(self) -> list:
+        nodes = []
+        for i in range(self.tree_widget.topLevelItemCount()):
+            pat_item = self.tree_widget.topLevelItem(i)
+            data = pat_item.data(0, Qt.ItemDataRole.UserRole)
+            if data and data[0] == "patient":
+                nodes.append((pat_item, data[1], data[2])) # item, name, id
+        return nodes
+
+    def update_selection_label(self) -> None:
+        files = self.get_selected_files()
+        self.selection_label.setText(f"{self.loc('selected_for_processing')}: {len(files)}")
+
+    # Запуск сканирования входной папки
+    def run_input_scan(self) -> None:
+        input_path = self.input_entry.text()
+        if not input_path or "Введите путь" in input_path or "Enter path" in input_path:
+            return
+
+        path = Path(input_path)
+        if not path.exists():
+            return
+
+        self.scan_btn.setEnabled(False)
+        self.scan_btn.setText(self.loc("tree_loading"))
+        self.selection_label.setText(self.loc("tree_loading"))
+        
+        self.scan_stop_event = threading.Event()
+        self.scan_dialog = ScanProgressDialog(self, self.scan_stop_event)
+        
+        threading.Thread(target=self._scan_thread, args=(path, self.scan_stop_event), daemon=True).start()
+        self.scan_dialog.exec()
+
+    def _scan_thread(self, path: Path, stop_event: threading.Event) -> None:
+        temp_config = ProcessingConfig(
+            new_uids=False, split_multiframe=False, clean_tags=False,
+            default_tags=False, explicit_vr=False, exclude_reports=False,
+            split_series=self.cb_split_series.isChecked()
+        )
+        logger = QtLogger(self.bridge)
+        processor = DicomProcessor(path, self.output_entry.text(), temp_config, logger, stop_event, lang=self.current_lang)
+        
+        try:
+            tree_data = processor.scan_input_directory()
+            self.bridge.tree_scanned_signal.emit(tree_data)
+        except Exception as e:
+            self.bridge.log_signal.emit(f"Error scanning directory: {e}", "error")
+            self.bridge.tree_scanned_signal.emit({})
+
+    def get_selected_files_or_autoscan(self) -> list:
+        selected_files = self.get_selected_files()
+        if not selected_files and self.tree_widget.topLevelItemCount() == 0:
+            input_path = self.input_entry.text()
+            if not input_path or "Введите путь" in input_path or "Enter path" in input_path:
+                return []
+            path = Path(input_path)
+            if not path.exists():
+                return []
+            
+            temp_config = ProcessingConfig(
+                new_uids=False, split_multiframe=False, clean_tags=False,
+                default_tags=False, explicit_vr=False, exclude_reports=False,
+                split_series=self.cb_split_series.isChecked()
+            )
+            logger = QtLogger(self.bridge)
+            processor = DicomProcessor(path, self.output_entry.text(), temp_config, logger, threading.Event(), lang=self.current_lang)
+            try:
+                tree_data = processor.scan_input_directory()
+                self.populate_tree(tree_data)
+                selected_files = self.get_selected_files()
+            except Exception:
+                pass
+        return selected_files
+
+    # Главный поток обработки
     def start_processing(self) -> None:
-        """Запускает или останавливает фоновый поток обработки DICOM."""
         if self.is_processing:
             self.stop_event.set()
-            self.start_btn.configure(text=self.loc("status_stopping"), state="disabled")
-            self.percent_label.configure(text=self.loc("stopping"))
+            self.start_btn.setText(self.loc("status_stopping"))
+            self.start_btn.setEnabled(False)
+            self.percent_label.setText(self.loc("stopping"))
             return
 
-        input_raw = self.input_dir_var.get()
-        output_raw = self.output_dir_var.get()
+        input_raw = self.input_entry.text()
+        output_raw = self.output_entry.text()
 
         if ("Введите путь" in input_raw or "Enter path" in input_raw or 
             "Введите путь" in output_raw or "Enter path" in output_raw):
-            timestamp = datetime.now().strftime("%H:%M:%S")
-            self.log_textbox.configure(state="normal")
-            self.log_textbox.insert(
-                "end", 
-                f"[{timestamp}] {self.loc('error_paths_not_set')}\n", 
-                "error"
-            )
-            self.log_textbox.configure(state="disabled")
+            self.add_log(self.loc('error_paths_not_set'), "error")
             return
 
         input_dir = Path(input_raw)
         output_dir = Path(output_raw)
 
         if not input_dir.exists():
-            timestamp = datetime.now().strftime("%H:%M:%S")
-            self.log_textbox.configure(state="normal")
-            self.log_textbox.insert(
-                "end", 
-                f"[{timestamp}] {self.loc('error_input_not_exist', input_dir)}\n", 
-                "error"
-            )
-            self.log_textbox.configure(state="disabled")
+            self.add_log(self.loc('error_input_not_exist', input_dir), "error")
             return
 
-        # Получаем выбранные файлы из дерева или авто-сканируем
         selected_files = self.get_selected_files_or_autoscan()
         if not selected_files:
-            timestamp = datetime.now().strftime("%H:%M:%S")
-            self.log_textbox.configure(state="normal")
-            self.log_textbox.insert(
-                "end", 
-                f"[{timestamp}] {self.loc('tree_empty')}\n", 
-                "error"
-            )
-            self.log_textbox.configure(state="disabled")
+            self.add_log(self.loc('tree_empty'), "error")
             return
 
-        # Интерактивная валидация данных пациента (Identity Compliance)
+        # Интерактивная валидация данных пациента
         patient_overrides = {}
-        patient_nodes = self.tree_view.get_patient_nodes()
-        for p_node in patient_nodes:
+        patient_nodes = self.get_patient_nodes_data()
+        for p_item, pat_name, pat_id in patient_nodes:
             any_selected = False
-            for study_node in p_node.children:
-                for series_node in study_node.children:
-                    if series_node.var.get():
+            for j in range(p_item.childCount()):
+                study_item = p_item.child(j)
+                for k in range(study_item.childCount()):
+                    series_item = study_item.child(k)
+                    if series_item.checkState(0) == Qt.CheckState.Checked:
                         any_selected = True
                         break
             if not any_selected:
                 continue
 
-            pat_name, pat_id = p_node.key
             is_valid = True
             if not pat_name or pat_name.strip() == "" or pat_name.upper() == "UNKNOWN":
                 is_valid = False
@@ -1120,9 +1121,7 @@ class DicomSplitterApp(ctk.CTk):
 
             if not is_valid:
                 dialog = PatientEditDialog(self, pat_name, pat_id)
-                if dialog.cancelled:
-                    pass
-                else:
+                if dialog.exec() == QDialog.DialogCode.Accepted:
                     new_name = dialog.new_name.strip()
                     new_id = dialog.new_id.strip()
                     if new_name and new_id:
@@ -1131,37 +1130,31 @@ class DicomSplitterApp(ctk.CTk):
         self.is_processing = True
         self.stop_event.clear()
         
-        self.start_btn.configure(
-            text=self.loc("stop_optimization"), 
-            fg_color="#ef4444", 
-            hover_color="#dc2626"
-        )
+        self.start_btn.setObjectName("stopBtn")
+        self.start_btn.setText(self.loc("stop_optimization"))
+        self.apply_styles() # Обновит стиль (сделает кнопку красной)
         
-        self.percent_label.configure(text=self.loc("processing", 0))
-        self.progress_bar.set(0)
-        self.log_textbox.configure(state="normal")
-        self.log_textbox.delete("1.0", "end")
-        self.log_textbox.configure(state="disabled")
+        self.percent_label.setText(self.loc("processing", 0))
+        self.progress_bar.setValue(0)
+        self.log_textbox.clear()
 
-        # Создаем DTO настроек
         config = ProcessingConfig(
-            new_uids=self.new_uids_var.get(),
-            split_multiframe=self.split_multiframe_var.get(),
-            clean_tags=self.clean_tags_var.get(),
-            default_tags=self.default_tags_var.get(),
-            explicit_vr=self.explicit_vr_var.get(),
-            exclude_reports=self.exclude_reports_var.get(),
-            split_series=self.split_series_var.get()
+            new_uids=self.cb_new_uids.isChecked(),
+            split_multiframe=self.cb_split_mf.isChecked(),
+            clean_tags=self.cb_clean_tags.isChecked(),
+            default_tags=self.cb_default_tags.isChecked(),
+            explicit_vr=self.cb_explicit_vr.isChecked(),
+            exclude_reports=self.cb_exclude_reports.isChecked(),
+            split_series=self.cb_split_series.isChecked()
         )
 
-        logger = QueueLogger(self.log_queue)
+        logger = QtLogger(self.bridge)
         processor = DicomProcessor(
             input_dir, output_dir, config, logger, self.stop_event, 
             lang=self.current_lang, selected_files=selected_files,
             patient_overrides=patient_overrides
         )
 
-        # Запускаем обработку в фоновом потоке
         threading.Thread(
             target=self._run_processor, 
             args=(processor,), 
@@ -1169,72 +1162,7 @@ class DicomSplitterApp(ctk.CTk):
         ).start()
 
     def _run_processor(self, processor: DicomProcessor) -> None:
-        """Функция-обертка для запуска процессора в отдельном потоке."""
         try:
             processor.process()
         finally:
-            self.log_queue.put(("finished",))
-
-    def on_tree_selection_change(self):
-        selected_files = self.tree_view.get_selected_files()
-        self.selection_label.configure(
-            text=f"{self.loc('selected_for_processing')}: {len(selected_files)}"
-        )
-
-    def run_input_scan(self) -> None:
-        input_path = self.input_dir_var.get()
-        if not input_path or "Введите путь" in input_path or "Enter path" in input_path:
-            return
-
-        path = Path(input_path)
-        if not path.exists():
-            return
-
-        self.scan_btn.configure(state="disabled", text=self.loc("tree_loading"))
-        self.selection_label.configure(text=self.loc("tree_loading"))
-        
-        self.scan_stop_event = threading.Event()
-        self.scan_dialog = ScanProgressDialog(self, self.scan_stop_event)
-        
-        threading.Thread(target=self._scan_thread, args=(path, self.scan_stop_event), daemon=True).start()
-
-    def _scan_thread(self, path: Path, stop_event: threading.Event) -> None:
-        temp_config = ProcessingConfig(
-            new_uids=False, split_multiframe=False, clean_tags=False,
-            default_tags=False, explicit_vr=False, exclude_reports=False,
-            split_series=self.split_series_var.get()
-        )
-        logger = QueueLogger(self.log_queue)
-        processor = DicomProcessor(path, self.output_dir_var.get(), temp_config, logger, stop_event, lang=self.current_lang)
-        
-        try:
-            tree_data = processor.scan_input_directory()
-            self.log_queue.put(("tree_scanned", tree_data))
-        except Exception as e:
-            self.log_queue.put(("log", f"Error scanning directory: {e}", "error"))
-            self.log_queue.put(("tree_scanned", {}))
-
-    def get_selected_files_or_autoscan(self) -> list:
-        selected_files = self.tree_view.get_selected_files()
-        if not selected_files and not self.tree_view.all_nodes:
-            input_path = self.input_dir_var.get()
-            if not input_path or "Введите путь" in input_path or "Enter path" in input_path:
-                return []
-            path = Path(input_path)
-            if not path.exists():
-                return []
-            
-            temp_config = ProcessingConfig(
-                new_uids=False, split_multiframe=False, clean_tags=False,
-                default_tags=False, explicit_vr=False, exclude_reports=False,
-                split_series=self.split_series_var.get()
-            )
-            logger = QueueLogger(self.log_queue)
-            processor = DicomProcessor(path, self.output_dir_var.get(), temp_config, logger, threading.Event(), lang=self.current_lang)
-            try:
-                tree_data = processor.scan_input_directory()
-                self.tree_view.populate(tree_data)
-                selected_files = self.tree_view.get_selected_files()
-            except Exception:
-                pass
-        return selected_files
+            self.bridge.finished_signal.emit()
