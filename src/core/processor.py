@@ -4,7 +4,7 @@ from pathlib import Path
 import sys
 import threading
 import traceback
-from typing import Dict, List, Set, Union
+from typing import Any, Dict, List, Set, Union
 
 import numpy as np
 import pydicom
