@@ -84,5 +84,9 @@
     "dialog_patient_message": "Обнаружены пустые или некорректные Имя/ID пациента. Пожалуйста, скорректируйте их:",
     "dialog_save": "Сохранить и продолжить",
     "dialog_pat_name": "Имя пациента:",
-    "dialog_pat_id": "ID пациента:"
+    "dialog_pat_id": "ID пациента:",
+    "dialog_scan_title": "Сканирование папки",
+    "dialog_scan_finding": "Поиск файлов DICOM...",
+    "dialog_scan_progress": "Просканировано: {} / {} файлов ({}%)",
+    "dialog_scan_cancel": "Отмена"
 }

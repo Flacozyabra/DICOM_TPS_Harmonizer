@@ -25,6 +25,16 @@ class BaseLogger(ABC):
         """
         pass
 
+    @abstractmethod
+    def update_scan_progress(self, current: int, total: int) -> None:
+        """Обновляет статус прогресса сканирования директории.
+
+        Args:
+            current: Количество просканированных элементов.
+            total: Общее количество элементов.
+        """
+        pass
+
 
 class QueueLogger(BaseLogger):
     """Потокобезопасный логгер, отправляющий сообщения в очередь queue.Queue."""
@@ -44,3 +54,7 @@ class QueueLogger(BaseLogger):
     def update_progress(self, current: int, total: int) -> None:
         """Кладет данные прогресса в очередь."""
         self.queue.put(("progress", current, total))
+
+    def update_scan_progress(self, current: int, total: int) -> None:
+        """Кладет данные прогресса сканирования в очередь."""
+        self.queue.put(("scan_progress", current, total))

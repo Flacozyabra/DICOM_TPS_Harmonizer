@@ -84,5 +84,9 @@
     "dialog_patient_message": "Empty or invalid Patient Name/ID detected. Please correct them:",
     "dialog_save": "Save & Continue",
     "dialog_pat_name": "Patient Name:",
-    "dialog_pat_id": "Patient ID:"
+    "dialog_pat_id": "Patient ID:",
+    "dialog_scan_title": "Scanning Folder",
+    "dialog_scan_finding": "Finding DICOM files...",
+    "dialog_scan_progress": "Scanned: {} / {} files ({}%)",
+    "dialog_scan_cancel": "Cancel"
 }
