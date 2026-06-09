@@ -464,8 +464,12 @@ class DicomProcessor:
                     if file_path.suffix.lower() == '.dcm' or '.' not in file_path.name:
                         all_files.append(file_path)
 
+        total_files = len(all_files)
+        if total_files > 0:
+            self.logger.update_scan_progress(0, total_files)
+
         tree = {}
-        for file_path in all_files:
+        for idx, file_path in enumerate(all_files):
             if self.stop_event.is_set():
                 break
             try:
@@ -499,6 +503,9 @@ class DicomProcessor:
             series_files = st_dict.setdefault(series_uid, [])
             series_files.append((file_path, series_num, series_desc, modality, orientation_key))
 
+            if (idx + 1) % 10 == 0 or (idx + 1) == total_files:
+                self.logger.update_scan_progress(idx + 1, total_files)
+
         final_tree = {}
         for (pat_name, pat_id), studies in tree.items():
             final_studies = {}
@@ -510,7 +517,7 @@ class DicomProcessor:
                         file_path, series_num, series_desc, modality, orientation_key = item
                         orientation_groups.setdefault(orientation_key, []).append(item)
 
-                    if len(orientation_groups) <= 1:
+                    if not self.config.split_series or len(orientation_groups) <= 1:
                         _, series_num, series_desc, modality, _ = files_info[0]
                         series_label = f"Series {series_num}: {modality} - {series_desc}"
                         final_series[(series_label, s_uid, 0)] = [x[0] for x in files_info]
