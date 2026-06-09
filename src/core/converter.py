@@ -60,6 +60,7 @@ def clean_and_build_dataset(
                     pass
 
     # Идентификаторы и метаданные
+    new_ds.SpecificCharacterSet = 'ISO_IR 100'
     new_ds.SOPClassUID = sop_class
     new_ds.SOPInstanceUID = generate_uid()
     new_ds.StudyInstanceUID = study_uid
@@ -77,6 +78,12 @@ def clean_and_build_dataset(
     new_ds.BitsStored = getattr(src_ds, 'BitsStored', 16)
     new_ds.HighBit = getattr(src_ds, 'HighBit', 15)
     new_ds.PixelRepresentation = getattr(src_ds, 'PixelRepresentation', 0)
+
+    # Принудительное приведение к 16-битному формату для Monaco TPS
+    if new_ds.BitsAllocated != 16:
+        new_ds.BitsAllocated = 16
+        new_ds.BitsStored = 16
+        new_ds.HighBit = 15
 
     # Обязательные теги по умолчанию (если включено)
     if config.default_tags:
@@ -115,6 +122,12 @@ def clean_and_build_dataset(
                 new_ds.MagneticFieldStrength = getattr(src_ds, 'MagneticFieldStrength', 1.5)
             if not hasattr(new_ds, 'AcquisitionNumber') or new_ds.AcquisitionNumber is None or new_ds.AcquisitionNumber == "":
                 new_ds.AcquisitionNumber = getattr(src_ds, 'AcquisitionNumber', 1)
+
+        # Специальные теги для модальности CT (для совместимости с Monaco TPS)
+        if getattr(src_ds, 'Modality', None) == 'CT':
+            new_ds.PatientSupportAngle = 0.0
+            new_ds.TableTopPitchAngle = 0.0
+            new_ds.TableTopRollAngle = 0.0
 
     # Запись пикселей
     if new_ds.PixelRepresentation == 1:
