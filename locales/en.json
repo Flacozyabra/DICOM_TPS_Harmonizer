@@ -92,5 +92,6 @@
     "tooltip_create_input": "Create Dicom_input folder in application directory",
     "tooltip_create_output": "Create Dicom_output folder in application directory",
     "tooltip_open_input": "Open input folder in Explorer",
-    "tooltip_open_output": "Open output folder in Explorer"
+    "tooltip_open_output": "Open output folder in Explorer",
+    "selected_status": "Selected files: {} / {} (Patients: {}, Studies: {})"
 }

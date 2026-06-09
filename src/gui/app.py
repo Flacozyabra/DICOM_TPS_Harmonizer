@@ -354,6 +354,7 @@ class DicomSplitterApp(QMainWindow):
         self.create_widgets()
         self.apply_styles()
         self.update_locale_texts()
+        self.center_on_screen()
         self.restore_window_state()
 
     def get_config_path(self) -> Path:
@@ -411,10 +412,12 @@ class DicomSplitterApp(QMainWindow):
             
         config_data["language"] = lang
         
-        # Сохраняем геометрию главного окна и состояние сплиттера
+        # Сохраняем геометрию главного окна и состояние сплиттеров
         config_data["window_geometry"] = self.saveGeometry().toHex().data().decode('utf-8')
         if hasattr(self, "splitter"):
             config_data["splitter_state"] = self.splitter.saveState().toHex().data().decode('utf-8')
+        if hasattr(self, "right_splitter"):
+            config_data["right_splitter_state"] = self.right_splitter.saveState().toHex().data().decode('utf-8')
         
         try:
             with open(config_file, "w", encoding="utf-8") as f:
@@ -438,8 +441,22 @@ class DicomSplitterApp(QMainWindow):
                     state_hex = data.get("splitter_state", "")
                     if state_hex and hasattr(self, "splitter"):
                         self.splitter.restoreState(QByteArray.fromHex(state_hex.encode('utf-8')))
+
+                    # Восстановление состояния вертикального сплиттера
+                    right_state_hex = data.get("right_splitter_state", "")
+                    if right_state_hex and hasattr(self, "right_splitter"):
+                        self.right_splitter.restoreState(QByteArray.fromHex(right_state_hex.encode('utf-8')))
             except Exception:
                 pass
+
+    def center_on_screen(self) -> None:
+        """Центрирует окно приложения на первичном экране."""
+        screen = QApplication.primaryScreen().geometry()
+        width = 1100
+        height = 720
+        x = (screen.width() - width) // 2
+        y = (screen.height() - height) // 2
+        self.setGeometry(x, y, width, height)
 
     def load_locale(self, lang: str) -> None:
         if getattr(sys, "frozen", False):
@@ -618,6 +635,15 @@ class DicomSplitterApp(QMainWindow):
         
         content_layout.addLayout(top_layout)
 
+        # Создаем вертикальный разделитель для правой панели
+        self.right_splitter = QSplitter(Qt.Orientation.Vertical)
+
+        # Контейнер для верхних блоков (папки и настройки)
+        upper_container = QFrame()
+        upper_layout = QVBoxLayout(upper_container)
+        upper_layout.setContentsMargins(0, 0, 0, 0)
+        upper_layout.setSpacing(12)
+
         # Группа 1: Выбор папок
         folder_frame = QFrame()
         folder_frame.setObjectName("groupFrame")
@@ -682,7 +708,7 @@ class DicomSplitterApp(QMainWindow):
         self.btn_browse_out.setFixedWidth(100)
         folder_layout.addWidget(self.btn_browse_out, 1, 4)
 
-        content_layout.addWidget(folder_frame)
+        upper_layout.addWidget(folder_frame)
 
         # Группа 2: Настройки оптимизации
         settings_frame = QFrame()
@@ -723,7 +749,7 @@ class DicomSplitterApp(QMainWindow):
         self.cb_split_series.setChecked(True)
         settings_layout.addWidget(self.cb_split_series, 4, 0)
 
-        content_layout.addWidget(settings_frame)
+        upper_layout.addWidget(settings_frame)
 
         # Группа 3: Лог выполнения
         log_frame = QFrame()
@@ -741,7 +767,11 @@ class DicomSplitterApp(QMainWindow):
         self.log_textbox.setFont(QFont("Consolas", 10))
         log_layout.addWidget(self.log_textbox)
 
-        content_layout.addWidget(log_frame)
+        # Добавляем элементы в вертикальный разделитель
+        self.right_splitter.addWidget(upper_container)
+        self.right_splitter.addWidget(log_frame)
+
+        content_layout.addWidget(self.right_splitter)
 
         # Группа 4: Прогресс и Кнопка пуска
         control_frame = QFrame()
@@ -771,10 +801,14 @@ class DicomSplitterApp(QMainWindow):
         self.splitter.addWidget(self.content_frame)
         main_layout.addWidget(self.splitter)
 
-        # Настройки сплиттера
+        # Настройки сплиттеров
         self.splitter.setCollapsible(0, True)   # Дерево может быть скрыто полностью
         self.splitter.setCollapsible(1, False)  # Главную панель скрывать нельзя
-        self.splitter.setSizes([320, 780])      # Пропорции по умолчанию
+        self.splitter.setSizes([220, 880])      # Пропорции по умолчанию (220px ширина дерева)
+
+        self.right_splitter.setCollapsible(0, False) # Настройки скрывать нельзя
+        self.right_splitter.setCollapsible(1, True)  # Лог можно полностью свернуть
+        self.right_splitter.setSizes([380, 200])     # Размеры по умолчанию
 
     def apply_styles(self) -> None:
         QApplication.instance().setStyleSheet("""
@@ -875,17 +909,17 @@ class DicomSplitterApp(QMainWindow):
                 color: #E5E7EB;
             }
             QProgressBar {
-                background-color: #1A1A1A;
-                border: 1px solid #2D2D2D;
-                border-radius: 9px;
+                background-color: #151515;
+                border: 1px solid #333333;
+                border-radius: 6px;
                 text-align: center;
-                color: #FFFFFF;
+                color: #E5E7EB;
                 font-weight: bold;
                 font-size: 11px;
             }
             QProgressBar::chunk {
-                background-color: #2563EB;
-                border-radius: 8px;
+                background-color: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:0, stop:0 #3B82F6, stop:1 #8B5CF6);
+                border-radius: 5px;
             }
             QCheckBox {
                 spacing: 8px;
@@ -910,6 +944,9 @@ class DicomSplitterApp(QMainWindow):
             }
             QSplitter::handle:horizontal {
                 width: 4px;
+            }
+            QSplitter::handle:vertical {
+                height: 4px;
             }
             QSplitter::handle:hover {
                 background-color: #3B82F6;
@@ -1162,8 +1199,25 @@ class DicomSplitterApp(QMainWindow):
         return nodes
 
     def update_selection_label(self) -> None:
-        files = self.get_selected_files()
-        self.selection_label.setText(f"{self.loc('selected_for_processing')}: {len(files)}")
+        selected_files = self.get_selected_files()
+        
+        total_patients = self.tree_widget.topLevelItemCount()
+        total_studies = 0
+        total_files_count = 0
+        
+        for i in range(total_patients):
+            pat_item = self.tree_widget.topLevelItem(i)
+            total_studies += pat_item.childCount()
+            for j in range(pat_item.childCount()):
+                study_item = pat_item.child(j)
+                for k in range(study_item.childCount()):
+                    series_item = study_item.child(k)
+                    data = series_item.data(0, Qt.ItemDataRole.UserRole)
+                    if data and data[0] == "series":
+                        total_files_count += len(data[3])
+                        
+        text = self.loc("selected_status", len(selected_files), total_files_count, total_patients, total_studies)
+        self.selection_label.setText(text)
 
     # Запуск сканирования входной папки
     def run_input_scan(self) -> None:

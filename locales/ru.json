@@ -92,5 +92,6 @@
     "tooltip_create_input": "Создать папку Dicom_input в каталоге программы",
     "tooltip_create_output": "Создать папку Dicom_output в каталоге программы",
     "tooltip_open_input": "Открыть папку ввода в Проводнике",
-    "tooltip_open_output": "Открыть папку вывода в Проводнике"
+    "tooltip_open_output": "Открыть папку вывода в Проводнике",
+    "selected_status": "Выбрано файлов: {} / {} (Пациентов: {}, Исследований: {})"
 }
