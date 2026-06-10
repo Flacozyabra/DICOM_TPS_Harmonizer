@@ -556,19 +556,68 @@ class DicomViewerWidget(QWidget):
             else:
                 self.ruler_close_rect = None
 
-            # Вывод параметров окна HU и Zoom в левый нижний угол
+            # Отрисовка метаданных пациента/серии в левом верхнем углу (OSD)
+            if self.current_dataset:
+                painter.setFont(QFont("Consolas", 10, QFont.Weight.Bold))
+                
+                pat_name = str(getattr(self.current_dataset, "PatientName", "Unknown"))
+                pat_id = str(getattr(self.current_dataset, "PatientID", "Unknown"))
+                
+                # Форматируем дату рождения
+                dob_raw = getattr(self.current_dataset, "PatientBirthDate", "")
+                dob = ""
+                if dob_raw and len(dob_raw) == 8:
+                    dob = f"{dob_raw[6:8]}-{dob_raw[4:6]}-{dob_raw[0:4]}"
+                else:
+                    dob = dob_raw
+                sex = getattr(self.current_dataset, "PatientSex", "")
+                pat_info = f"{dob} {sex}".strip()
+                
+                study_desc = getattr(self.current_dataset, "StudyDescription", "")
+                series_desc = getattr(self.current_dataset, "SeriesDescription", "")
+                
+                top_lines = [pat_name, pat_id, pat_info, study_desc, series_desc]
+                top_lines = [line for line in top_lines if line] # убираем пустые
+                
+                y_offset = 15
+                for line in top_lines:
+                    metrics = painter.fontMetrics()
+                    rect_line = metrics.boundingRect(line)
+                    rect_line.moveTopLeft(QPoint(15, y_offset))
+                    painter.fillRect(rect_line.adjusted(-4, -2, 4, 2), QColor(0, 0, 0, 150))
+                    painter.setPen(QColor("#E5E7EB"))
+                    painter.drawText(rect_line, Qt.AlignmentFlag.AlignLeft, line)
+                    y_offset += rect_line.height() + 5
+
+            # Вывод параметров окна HU, Zoom, Modality и Transfer Syntax в левый нижний угол
             painter.setFont(QFont("Consolas", 10, QFont.Weight.Bold))
-            painter.setPen(QColor("#9CA3AF"))
-            info_text = f"W: {int(self.window_width)} L: {int(self.window_center)} | Zoom: {int(self.zoom_factor * 100)}%"
             
-            # Подложка под системную плашку
-            metrics = painter.fontMetrics()
-            rect_info = metrics.boundingRect(info_text)
-            rect_info.moveBottomLeft(QPoint(15, self.height() - 15))
-            painter.fillRect(rect_info.adjusted(-4, -2, 4, 2), QColor(0, 0, 0, 150))
+            lines_bottom = []
+            lines_bottom.append(f"WL: {int(self.window_center)} WW: {int(self.window_width)} | Zoom: {int(self.zoom_factor * 100)}%")
             
-            painter.setPen(QColor("#E5E7EB"))
-            painter.drawText(rect_info, Qt.AlignmentFlag.AlignLeft, info_text)
+            if self.current_dataset:
+                modality = getattr(self.current_dataset, "Modality", "")
+                if modality:
+                    lines_bottom.append(f"Modality: {modality}")
+                
+                try:
+                    ts_uid = self.current_dataset.file_meta.TransferSyntaxUID
+                    ts_name = ts_uid.name
+                    if " (" in ts_name:
+                        ts_name = ts_name.split(" (")[0]
+                    lines_bottom.append(f"TS: {ts_name}")
+                except Exception:
+                    pass
+
+            metrics_b = painter.fontMetrics()
+            y_offset_b = self.height() - 15
+            for line in reversed(lines_bottom):
+                rect_info = metrics_b.boundingRect(line)
+                rect_info.moveBottomLeft(QPoint(15, y_offset_b))
+                painter.fillRect(rect_info.adjusted(-4, -2, 4, 2), QColor(0, 0, 0, 150))
+                painter.setPen(QColor("#E5E7EB"))
+                painter.drawText(rect_info, Qt.AlignmentFlag.AlignLeft, line)
+                y_offset_b -= rect_info.height() + 5
 
     def draw_tick(self, painter: QPainter, pt1: QPointF, pt2: QPointF) -> None:
         dx = pt2.x() - pt1.x()
@@ -609,12 +658,13 @@ class DicomViewerPanel(QWidget):
         layout.setContentsMargins(15, 10, 15, 10)
         layout.setSpacing(10)
 
-        # 1. Верхняя панель (Информация о серии, Кнопка линейки, Кнопка HU, Выбор пресетов, Кнопка закрыть)
+        # 1.  Верхняя панель (Информация о серии, Кнопка линейки, Кнопка HU, Выбор пресетов, Кнопка закрыть)
         top_layout = QHBoxLayout()
         top_layout.setSpacing(10)
         
         self.lbl_info = QLabel(self)
         self.lbl_info.setStyleSheet("font-size: 13px; font-weight: bold; color: #FFFFFF;")
+        self.lbl_info.hide() # Скрываем, так как информация теперь выводится на оверлее вьюера
         top_layout.addWidget(self.lbl_info)
 
         top_layout.addStretch()
@@ -679,7 +729,7 @@ class DicomViewerPanel(QWidget):
         
         layout.addLayout(top_layout)
 
-        # 2. Центральная область (Изображение + Слайдер)
+        # 2.  Центральная область (Изображение и шкала HU справа)
         main_layout = QHBoxLayout()
         main_layout.setSpacing(15)
 
@@ -688,31 +738,35 @@ class DicomViewerPanel(QWidget):
         self.viewer.window_changed.connect(self.on_window_changed)
         main_layout.addWidget(self.viewer, stretch=1)
 
-        self.slider = QSlider(Qt.Orientation.Vertical, self)
-        self.slider.setInvertedAppearance(True)
-        self.slider.valueChanged.connect(self.on_slider_changed)
-        self.slider.setStyleSheet("""
-            QSlider::groove:vertical {
-                background: #1F2937;
-                width: 6px;
-                border-radius: 3px;
-            }
-            QSlider::handle:vertical {
-                background: #3B82F6;
-                height: 30px;
-                margin-left: -5px;
-                margin-right: -5px;
-                border-radius: 6px;
-            }
-            QSlider::handle:vertical:hover {
-                background: #60A5FA;
-            }
-        """)
-        main_layout.addWidget(self.slider)
+        # Создаем и добавляем шкалу HU справа
+        self.setup_hu_panel()
+        main_layout.addWidget(self.hu_panel)
 
         layout.addLayout(main_layout)
 
-        # 3. Нижняя информационная плашка
+        # 2.5 Горизонтальный слайдер срезов снизу
+        self.slider = QSlider(Qt.Orientation.Horizontal, self)
+        self.slider.valueChanged.connect(self.on_slider_changed)
+        self.slider.setStyleSheet("""
+            QSlider::groove:horizontal {
+                background: #1F2937;
+                height: 6px;
+                border-radius: 3px;
+            }
+            QSlider::handle:horizontal {
+                background: #3B82F6;
+                width: 30px;
+                margin-top: -5px;
+                margin-bottom: -5px;
+                border-radius: 6px;
+            }
+            QSlider::handle:horizontal:hover {
+                background: #60A5FA;
+            }
+        """)
+        layout.addWidget(self.slider)
+
+        # 3.  Нижняя информационная плашка
         self.lbl_status = QLabel(self)
         self.lbl_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_status.setStyleSheet("font-size: 12px; color: #9CA3AF; font-weight: bold;")
@@ -722,6 +776,82 @@ class DicomViewerPanel(QWidget):
         self.update_buttons_style()
         self.retranslate_ui()
         self.cb_presets.currentIndexChanged.connect(self.apply_preset)
+
+    def setup_hu_panel(self) -> None:
+        self.hu_panel = QFrame(self)
+        self.hu_panel.setFixedWidth(200)
+        self.hu_panel.setStyleSheet("""
+            QFrame {
+                background-color: #1F2937;
+                border: 1px solid #374151;
+                border-radius: 6px;
+            }
+            QLabel {
+                border: none;
+                background: transparent;
+                color: #E5E7EB;
+            }
+            QSlider::groove:horizontal {
+                background: #111827;
+                height: 4px;
+                border-radius: 2px;
+            }
+            QSlider::handle:horizontal {
+                background: #10B981;
+                width: 16px;
+                margin-top: -6px;
+                margin-bottom: -6px;
+                border-radius: 8px;
+            }
+            QSlider::handle:horizontal:hover {
+                background: #34D399;
+            }
+        """)
+        panel_layout = QVBoxLayout(self.hu_panel)
+        panel_layout.setContentsMargins(12, 12, 12, 12)
+        panel_layout.setSpacing(12)
+
+        # Заголовок
+        self.lbl_hu_title = QLabel("Параметры HU", self.hu_panel)
+        self.lbl_hu_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #FFFFFF;")
+        panel_layout.addWidget(self.lbl_hu_title)
+
+        # Window Center (Level)
+        panel_layout.addSpacing(5)
+        self.lbl_wc_val = QLabel("Level: 40", self.hu_panel)
+        self.lbl_wc_val.setStyleSheet("font-size: 12px; font-weight: bold;")
+        panel_layout.addWidget(self.lbl_wc_val)
+
+        self.slider_wc = QSlider(Qt.Orientation.Horizontal, self.hu_panel)
+        self.slider_wc.setRange(-1000, 3000)
+        self.slider_wc.setValue(40)
+        self.slider_wc.valueChanged.connect(self.on_panel_wc_changed)
+        panel_layout.addWidget(self.slider_wc)
+
+        # Window Width
+        panel_layout.addSpacing(5)
+        self.lbl_ww_val = QLabel("Width: 400", self.hu_panel)
+        self.lbl_ww_val.setStyleSheet("font-size: 12px; font-weight: bold;")
+        panel_layout.addWidget(self.lbl_ww_val)
+
+        self.slider_ww = QSlider(Qt.Orientation.Horizontal, self.hu_panel)
+        self.slider_ww.setRange(1, 4000)
+        self.slider_ww.setValue(400)
+        self.slider_ww.valueChanged.connect(self.on_panel_ww_changed)
+        panel_layout.addWidget(self.slider_ww)
+
+        panel_layout.addStretch()
+        self.hu_panel.hide()
+
+    def on_panel_wc_changed(self, value: int) -> None:
+        self.window_center = float(value)
+        self.lbl_wc_val.setText(self.parent_app.loc("hu_level", value) if hasattr(self.parent_app, "loc") else f"Level: {value}")
+        self.update_current_slice_pixels()
+
+    def on_panel_ww_changed(self, value: int) -> None:
+        self.window_width = float(value)
+        self.lbl_ww_val.setText(self.parent_app.loc("hu_width", value) if hasattr(self.parent_app, "loc") else f"Width: {value}")
+        self.update_current_slice_pixels()
 
     def retranslate_ui(self) -> None:
         self.cb_presets.blockSignals(True)
@@ -735,6 +865,11 @@ class DicomViewerPanel(QWidget):
 
         self.btn_ruler.setToolTip(self.parent_app.loc("tooltip_ruler") if hasattr(self.parent_app, "loc") else "Линейка")
         self.btn_hu.setToolTip(self.parent_app.loc("tooltip_hu") if hasattr(self.parent_app, "loc") else "Настройка окна HU")
+
+        if hasattr(self, "hu_panel"):
+            self.lbl_hu_title.setText(self.parent_app.loc("hu_panel_title") if hasattr(self.parent_app, "loc") else "Параметры HU")
+            self.lbl_wc_val.setText(self.parent_app.loc("hu_level", int(self.slider_wc.value())) if hasattr(self.parent_app, "loc") else f"Level: {int(self.slider_wc.value())}")
+            self.lbl_ww_val.setText(self.parent_app.loc("hu_width", int(self.slider_ww.value())) if hasattr(self.parent_app, "loc") else f"Width: {int(self.slider_ww.value())}")
 
     def create_ruler_icon(self) -> QIcon:
         pixmap = QPixmap(24, 24)
@@ -818,6 +953,8 @@ class DicomViewerPanel(QWidget):
         self.viewer.ruler_active = active
         if active:
             self.viewer.hu_active = False
+            if hasattr(self, "hu_panel"):
+                self.hu_panel.hide()
         self.update_buttons_style()
 
     def toggle_hu(self) -> None:
@@ -825,6 +962,11 @@ class DicomViewerPanel(QWidget):
         self.viewer.hu_active = active
         if active:
             self.viewer.ruler_active = False
+            if hasattr(self, "hu_panel"):
+                self.hu_panel.show()
+        else:
+            if hasattr(self, "hu_panel"):
+                self.hu_panel.hide()
         self.update_buttons_style()
 
     def load_series(self, files: list[str]) -> None:
@@ -1015,6 +1157,21 @@ class DicomViewerPanel(QWidget):
     def on_window_changed(self, width: float, center: float) -> None:
         self.window_width = width
         self.window_center = center
+        if hasattr(self, "hu_panel"):
+            self.slider_wc.blockSignals(True)
+            self.slider_ww.blockSignals(True)
+            
+            wc_val = max(-1000, min(int(center), 3000))
+            ww_val = max(1, min(int(width), 4000))
+            
+            self.slider_wc.setValue(wc_val)
+            self.slider_ww.setValue(ww_val)
+            
+            self.lbl_wc_val.setText(self.parent_app.loc("hu_level", wc_val) if hasattr(self.parent_app, "loc") else f"Level: {wc_val}")
+            self.lbl_ww_val.setText(self.parent_app.loc("hu_width", ww_val) if hasattr(self.parent_app, "loc") else f"Width: {ww_val}")
+            
+            self.slider_wc.blockSignals(False)
+            self.slider_ww.blockSignals(False)
         self.update_current_slice_pixels()
 
     def update_current_slice_pixels(self) -> None:
@@ -1050,7 +1207,7 @@ class DicomViewerPanel(QWidget):
             self.window_width = 80.0
             self.window_center = 40.0
 
-        self.update_current_slice_pixels()
+        self.on_window_changed(self.window_width, self.window_center)
 
     def dicom_to_pixmap(self, ds, window_width: float, window_center: float) -> QPixmap | None:
         try:
@@ -1761,6 +1918,8 @@ class DicomSplitterApp(QMainWindow):
         self.splitter.setCollapsible(0, True)   # Дерево может быть скрыто полностью
         self.splitter.setCollapsible(1, False)  # Главную панель скрывать нельзя
         self.splitter.setSizes([220, 880])      # Пропорции по умолчанию (220px ширина дерева)
+        self.splitter.setStretchFactor(0, 1)    # Дерево проводника растягивается при увеличении окна
+        self.splitter.setStretchFactor(1, 0)    # Правая область сохраняет свой размер
 
         self.right_splitter.setCollapsible(0, True)  # Папки можно скрыть
         self.right_splitter.setCollapsible(1, True)  # Настройки можно скрыть
@@ -1800,6 +1959,14 @@ class DicomSplitterApp(QMainWindow):
                 border: 1px solid #2D2D2D;
                 border-radius: 6px;
                 padding: 5px;
+            }
+            QTreeView::branch:has-children:closed {
+                border-image: none;
+                image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiNGRkZGRkYiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNOSA1bDcgNy03IDciLz48L3N2Zz4=);
+            }
+            QTreeView::branch:has-children:open {
+                border-image: none;
+                image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiMzQjgyRjYiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNiA5bDYgNiA2LTYiLz48L3N2Zz4=);
             }
             QTreeWidget::item {
                 padding: 6px 4px;
@@ -2084,6 +2251,15 @@ class DicomSplitterApp(QMainWindow):
                     series_item.setData(0, Qt.ItemDataRole.UserRole, ("series", s_uid, seg_idx, files))
 
         self.tree_widget.expandAll()
+        self.tree_widget.resizeColumnToContents(0)
+        needed_width = self.tree_widget.columnWidth(0) + 60
+        needed_width = max(220, min(needed_width, 600))
+        sizes = self.splitter.sizes()
+        if len(sizes) >= 2:
+            total = sum(sizes)
+            sizes[0] = needed_width
+            sizes[1] = total - needed_width
+            self.splitter.setSizes(sizes)
         self._is_updating_tree = False
 
     def on_item_clicked(self, item: QTreeWidgetItem, column: int) -> None:
@@ -2117,6 +2293,13 @@ class DicomSplitterApp(QMainWindow):
         self.viewer_active = False
         self.current_view_series_uid = None
         self.current_view_seg_idx = None
+        
+        # Сбрасываем инструменты вьюера и скрываем hu_panel
+        self.viewer_panel.viewer.ruler_active = False
+        self.viewer_panel.viewer.hu_active = False
+        if hasattr(self.viewer_panel, "hu_panel"):
+            self.viewer_panel.hu_panel.hide()
+        self.viewer_panel.update_buttons_style()
         
         self.right_stack.setCurrentIndex(0) # Переключаем на исходный интерфейс
         self.tree_widget.clearSelection()   # Снимаем выделение в дереве

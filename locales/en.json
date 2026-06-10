@@ -106,5 +106,8 @@
     "preset_lung": "Lung",
     "preset_brain": "Brain",
     "tooltip_ruler": "Toggle ruler",
-    "tooltip_hu": "Adjust HU window (contrast)"
+    "tooltip_hu": "Adjust HU window (contrast)",
+    "hu_panel_title": "HU Parameters",
+    "hu_level": "Level: {}",
+    "hu_width": "Width: {}"
 }
