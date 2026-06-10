@@ -14,7 +14,8 @@
 * **Автоматическое исправление (Siemens EOF Fix):** На лету восстанавливает поврежденные файлы, у которых отсутствует концевой маркер последовательности пикселей.
 * **Удобная структура папок:** Группирует результаты в виде:  
   `Dicom_output / <Имя_Пациента>_<ID_Пациента> / <Модальность_Описание_Серии> / slice_XXXX.dcm`
-* **Современный GUI:** Интерфейс на базе `CustomTkinter` с темной темой, прогресс-баром и интерактивным цветовым логированием операций в реальном времени.
+* **Интерактивный DICOM вьюер:** Встроенный инструмент просмотра серий с поддержкой масштабирования (Zoom), перемещения (Pan), измерительной линейки и тонкой настройки Hounsfield Units (HU) через слайдеры панели управления.
+* **Современный GUI:** Премиальный интерфейс на базе `PyQt6` с темной темой, автоподбором размеров проводника пациентов и цветовым логированием в реальном времени.
 * **Мультиязычность:** Встроенная поддержка русского и английского языков для интерфейса и логов процессора.
 
 ### Использование готовой сборки
@@ -41,7 +42,8 @@
 * **On-the-fly Recovery (Siemens EOF Fix):** Automatically fixes and parses truncated files lacking sequence delimiters.
 * **Clear Directory Hierarchy:** Outputs structured patient datasets:  
   `Dicom_output / <PatientName>_<PatientID> / <Modality_SeriesDescription> / slice_XXXX.dcm`
-* **Modern GUI:** Powered by `CustomTkinter` with a dark theme, real-time progress bar, and color-coded operation logs.
+* **Interactive DICOM Viewer:** Integrated series visualization featuring Zoom, Pan, measurement ruler, and HU window Level/Width sliders.
+* **Modern GUI:** Sleek dark-mode interface built with `PyQt6`, featuring automatic patient explorer resizing and real-time color logging.
 * **Multi-language support:** Built-in Russian and English localizations for both GUI and execution logs.
 
 ### Using pre-built binaries
