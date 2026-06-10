@@ -919,8 +919,17 @@ class DicomViewerPanel(QWidget):
             
         arr = np.frombuffer(raw_pixels, dtype=dtype).reshape((rows, cols))
         ds._pixel_array = arr
-        type(ds).pixel_array = property(lambda self: getattr(self, "_pixel_array", None))
+        
+        # Создаем динамический подкласс для конкретного поврежденного экземпляра,
+        # чтобы переопределить pixel_array только для него, не влияя на другие файлы.
+        class TruncatedDataset(type(ds)):
+            @property
+            def pixel_array(self):
+                return getattr(self, "_pixel_array", None)
+                
+        ds.__class__ = TruncatedDataset
         return ds
+
 
     def set_current_slice(self, index: int) -> None:
         if index < 0 or index >= len(self.sorted_files):
