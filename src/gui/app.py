@@ -1961,7 +1961,11 @@ class DicomSplitterApp(QMainWindow):
         self.right_splitter.setSizes([90, 135, 245])     # Размеры по умолчанию
 
     def apply_styles(self) -> None:
-        QApplication.instance().setStyleSheet("""
+        arrow_right = (self.project_root / "themes" / "arrow_right.png").as_posix()
+        arrow_down = (self.project_root / "themes" / "arrow_down.png").as_posix()
+        chk_checked = (self.project_root / "themes" / "checkbox_checked.png").as_posix()
+
+        qss = """
             QMainWindow {
                 background-color: #121212;
             }
@@ -1999,14 +2003,14 @@ class DicomSplitterApp(QMainWindow):
             QTreeWidget::branch:has-children:closed,
             QTreeWidget::branch:has-children:closed:has-siblings {
                 border-image: none;
-                image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiNGRkZGRkYiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNOSA1bDcgNy03IDciLz48L3N2Zz4=);
+                image: url(PATH_ARROW_RIGHT);
             }
             QTreeView::branch:has-children:open,
             QTreeView::branch:has-children:open:has-siblings,
             QTreeWidget::branch:has-children:open,
             QTreeWidget::branch:has-children:open:has-siblings {
                 border-image: none;
-                image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiMzQjgyRjYiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNiA5bDYgNiA2LTYiLz48L3N2Zz4=);
+                image: url(PATH_ARROW_DOWN);
             }
             QTreeWidget::indicator, QTreeView::indicator {
                 width: 14px;
@@ -2021,7 +2025,7 @@ class DicomSplitterApp(QMainWindow):
             QTreeWidget::indicator:checked, QTreeView::indicator:checked {
                 background-color: #2563EB;
                 border-color: #2563EB;
-                image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjQiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBvbHlsaW5lIHBvaW50cz0iMjAgNiA5IDE3IDQgMTIiPjwvcG9seWxpbmU+PC9zdmc+);
+                image: url(PATH_CHECKBOX_CHECKED);
             }
             QTreeWidget::indicator:unchecked, QTreeView::indicator:unchecked {
                 background-color: #121212;
@@ -2191,7 +2195,11 @@ class DicomSplitterApp(QMainWindow):
                 border-radius: 4px;
                 padding: 4px;
             }
-        """)
+        """.replace("PATH_ARROW_RIGHT", arrow_right)\
+           .replace("PATH_ARROW_DOWN", arrow_down)\
+           .replace("PATH_CHECKBOX_CHECKED", chk_checked)
+
+        QApplication.instance().setStyleSheet(qss)
 
     # Методы обзора и открытия папок
     def browse_input(self) -> None:
