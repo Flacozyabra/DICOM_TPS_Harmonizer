@@ -563,7 +563,7 @@ class DicomViewerPanel(QWidget):
 
         # Выпадающий список пресетов HU
         self.cb_presets = QComboBox(self)
-        self.cb_presets.setFixedWidth(160)
+        self.cb_presets.setFixedWidth(200)
         self.cb_presets.setStyleSheet("""
             QComboBox {
                 background-color: #2A2A2A;
@@ -786,10 +786,6 @@ class DicomViewerPanel(QWidget):
             try:
                 # Быстрое сканирование тегов для сортировки
                 ds = pydicom.dcmread(f, stop_before_pixels=True)
-                
-                # Фильтруем файлы без пиксельных данных сразу при загрузке
-                if 0x7FE00010 not in ds:
-                    continue
                 
                 ipp = getattr(ds, "ImagePositionPatient", None)
                 z_coord = float(ipp[2]) if ipp and len(ipp) >= 3 else 0.0
