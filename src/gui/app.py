@@ -246,20 +246,19 @@ class UpdateCheckerThread(QThread):
         self.current_version = current_version
 
     def run(self) -> None:
-        url = "https://api.github.com/repos/Flacozyabra/DICOM_TPS_Harmonizer/releases/latest"
+        url = "https://github.com/Flacozyabra/DICOM_TPS_Harmonizer/releases/latest"
         req = urllib.request.Request(
             url,
-            headers={'User-Agent': 'DICOM-TPS-Harmonizer-Updater'}
+            headers={'User-Agent': 'Mozilla/5.0'}
         )
         try:
             with urllib.request.urlopen(req, timeout=3.0) as response:
-                if response.status == 200:
-                    data = json.loads(response.read().decode('utf-8'))
-                    tag_name = data.get("tag_name", "")
-                    html_url = data.get("html_url", "https://github.com/Flacozyabra/DICOM_TPS_Harmonizer/releases")
-                    if tag_name:
-                        if self.is_newer(tag_name, self.current_version):
-                            self.update_available.emit(tag_name, html_url)
+                final_url = response.geturl()
+                match = re.search(r'/releases/tag/([^/]+)', final_url)
+                if match:
+                    tag_name = match.group(1)
+                    if self.is_newer(tag_name, self.current_version):
+                        self.update_available.emit(tag_name, final_url)
         except Exception:
             pass
 
