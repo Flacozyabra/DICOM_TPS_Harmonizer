@@ -869,66 +869,68 @@ class DicomViewerPanel(QWidget):
 
     def read_truncated_dicom(self, filepath: str):
         import pydicom
+        import io
         import numpy as np
         
-        # Читаем только метаданные
-        ds = pydicom.dcmread(filepath, stop_before_pixels=True)
-        
-        rows = getattr(ds, "Rows", 512)
-        cols = getattr(ds, "Columns", 512)
-        bits = getattr(ds, "BitsAllocated", 16)
-        expected_size = rows * cols * (bits // 8)
+        # Сначала читаем метаданные с stop_before_pixels=True, чтобы узнать Transfer Syntax и размер
+        ds_meta = pydicom.dcmread(filepath, stop_before_pixels=True)
+        transfer_syntax = ds_meta.file_meta.TransferSyntaxUID
         
         with open(filepath, "rb") as f:
-            file_bytes = f.read()
+            file_bytes = bytearray(f.read())
             
-        # Ищем тег PixelData (0x7fe0, 0x0010)
-        idx = file_bytes.find(b"\xe0\x7f\x10\x00")
-        pixel_start = -1
-        if idx != -1:
-            vr = file_bytes[idx+4:idx+6]
-            if vr.isalpha() and vr.isupper():
-                pixel_start = idx + 12
-            else:
-                pixel_start = idx + 8
-        else:
-            idx = file_bytes.find(b"\x7f\xe0\x00\x10")
-            if idx != -1:
-                vr = file_bytes[idx+4:idx+6]
-                if vr.isalpha() and vr.isupper():
-                    pixel_start = idx + 12
-                else:
-                    pixel_start = idx + 8
-                    
-        if pixel_start == -1 or pixel_start >= len(file_bytes):
-            raise ValueError("Pixel Data tag not found or file is too short")
-            
-        raw_pixels = bytearray(file_bytes[pixel_start:])
-        if len(raw_pixels) < expected_size:
-            raw_pixels.extend(b"\x00" * (expected_size - len(raw_pixels)))
-        else:
-            raw_pixels = raw_pixels[:expected_size]
-            
-        pixel_repr = getattr(ds, "PixelRepresentation", 0)
-        if bits == 16:
-            dtype = np.int16 if pixel_repr == 1 else np.uint16
-        elif bits == 8:
-            dtype = np.int8 if pixel_repr == 1 else np.uint8
-        else:
-            dtype = np.uint16
-            
-        arr = np.frombuffer(raw_pixels, dtype=dtype).reshape((rows, cols))
-        ds._pixel_array = arr
+        # Определяем, сжатый ли формат пикселей
+        is_compressed = transfer_syntax.startswith("1.2.840.10008.1.2.4.") or "rle" in getattr(ds_meta.file_meta, "TransferSyntaxUID_name", "").lower()
         
-        # Создаем динамический подкласс для конкретного поврежденного экземпляра,
-        # чтобы переопределить pixel_array только для него, не влияя на другие файлы.
-        class TruncatedDataset(type(ds)):
-            @property
-            def pixel_array(self):
-                return getattr(self, "_pixel_array", None)
+        if is_compressed:
+            # Ищем маркер конца JPEG (FF D9) в конце файла
+            has_eoi = file_bytes.endswith(b"\xff\xd9") or b"\xff\xd9" in file_bytes[-20:]
+            if not has_eoi:
+                file_bytes.extend(b"\xff\xd9")
                 
-        ds.__class__ = TruncatedDataset
+            # Добавим Sequence Delimiter (FE FF DD E0 00 00 00 00), если его нет в конце
+            has_delim = b"\xfe\xff\xdd\xe0" in file_bytes[-20:]
+            if not has_delim:
+                file_bytes.extend(b"\xfe\xff\xdd\xe0\x00\x00\x00\x00")
+        else:
+            # Несжатые пиксели - дополняем нулями до ожидаемого размера
+            rows = getattr(ds_meta, "Rows", 512)
+            cols = getattr(ds_meta, "Columns", 512)
+            bits = getattr(ds_meta, "BitsAllocated", 16)
+            expected_pixels = rows * cols * (bits // 8)
+            if len(file_bytes) < expected_pixels:
+                file_bytes.extend(b"\x00" * (expected_pixels * 2))
+                
+        # Читаем из BytesIO
+        bio = io.BytesIO(file_bytes)
+        ds = pydicom.dcmread(bio)
+        
+        # Чтобы убедиться, что при обращении к pixel_array не упадет, пробуем прочесть его.
+        # Если упадет (например, JPEG данные повреждены внутри), подкладываем черный кадр.
+        try:
+            _ = ds.pixel_array
+        except Exception:
+            rows = getattr(ds, "Rows", 512)
+            cols = getattr(ds, "Columns", 512)
+            bits = getattr(ds, "BitsAllocated", 16)
+            pixel_repr = getattr(ds, "PixelRepresentation", 0)
+            if bits == 16:
+                dtype = np.int16 if pixel_repr == 1 else np.uint16
+            else:
+                dtype = np.int8 if pixel_repr == 1 else np.uint8
+            arr = np.zeros((rows, cols), dtype=dtype)
+            
+            # Динамически переопределяем класс для этого конкретного экземпляра
+            class TruncatedDataset(type(ds)):
+                @property
+                def pixel_array(self):
+                    return getattr(self, "_pixel_array", None)
+            
+            ds._pixel_array = arr
+            ds.__class__ = TruncatedDataset
+            
         return ds
+
 
 
     def set_current_slice(self, index: int) -> None:
