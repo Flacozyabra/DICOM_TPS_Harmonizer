@@ -867,6 +867,61 @@ class DicomViewerPanel(QWidget):
         
         self.set_current_slice(0)
 
+    def read_truncated_dicom(self, filepath: str):
+        import pydicom
+        import numpy as np
+        
+        # Читаем только метаданные
+        ds = pydicom.dcmread(filepath, stop_before_pixels=True)
+        
+        rows = getattr(ds, "Rows", 512)
+        cols = getattr(ds, "Columns", 512)
+        bits = getattr(ds, "BitsAllocated", 16)
+        expected_size = rows * cols * (bits // 8)
+        
+        with open(filepath, "rb") as f:
+            file_bytes = f.read()
+            
+        # Ищем тег PixelData (0x7fe0, 0x0010)
+        idx = file_bytes.find(b"\xe0\x7f\x10\x00")
+        pixel_start = -1
+        if idx != -1:
+            vr = file_bytes[idx+4:idx+6]
+            if vr.isalpha() and vr.isupper():
+                pixel_start = idx + 12
+            else:
+                pixel_start = idx + 8
+        else:
+            idx = file_bytes.find(b"\x7f\xe0\x00\x10")
+            if idx != -1:
+                vr = file_bytes[idx+4:idx+6]
+                if vr.isalpha() and vr.isupper():
+                    pixel_start = idx + 12
+                else:
+                    pixel_start = idx + 8
+                    
+        if pixel_start == -1 or pixel_start >= len(file_bytes):
+            raise ValueError("Pixel Data tag not found or file is too short")
+            
+        raw_pixels = bytearray(file_bytes[pixel_start:])
+        if len(raw_pixels) < expected_size:
+            raw_pixels.extend(b"\x00" * (expected_size - len(raw_pixels)))
+        else:
+            raw_pixels = raw_pixels[:expected_size]
+            
+        pixel_repr = getattr(ds, "PixelRepresentation", 0)
+        if bits == 16:
+            dtype = np.int16 if pixel_repr == 1 else np.uint16
+        elif bits == 8:
+            dtype = np.int8 if pixel_repr == 1 else np.uint8
+        else:
+            dtype = np.uint16
+            
+        arr = np.frombuffer(raw_pixels, dtype=dtype).reshape((rows, cols))
+        ds._pixel_array = arr
+        type(ds).pixel_array = property(lambda self: getattr(self, "_pixel_array", None))
+        return ds
+
     def set_current_slice(self, index: int) -> None:
         if index < 0 or index >= len(self.sorted_files):
             return
@@ -877,12 +932,14 @@ class DicomViewerPanel(QWidget):
         filepath = self.sorted_files[index]
         import pydicom
         try:
-            # Читаем файл
-            ds = pydicom.dcmread(filepath)
-            
-            # Извлекаем и проверяем наличие пиксельного массива
-            if not hasattr(ds, "pixel_array"):
-                raise ValueError("No pixel array tag in file")
+            # Читаем файл. Сначала пробуем обычное чтение.
+            try:
+                ds = pydicom.dcmread(filepath)
+                if not hasattr(ds, "pixel_array") or len(ds) == 0:
+                    raise ValueError("Empty dataset or missing pixel array")
+            except Exception:
+                # Если обычное чтение упало, пробуем восстановить частично поврежденный файл
+                ds = self.read_truncated_dicom(filepath)
 
             # Извлекаем параметры окна по умолчанию при первой загрузке серии
             if self.current_index == 0:
