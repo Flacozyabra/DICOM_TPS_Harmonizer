@@ -1988,6 +1988,12 @@ class DicomSplitterApp(QMainWindow):
                 border-radius: 6px;
                 padding: 5px;
             }
+            QTreeView::branch,
+            QTreeWidget::branch {
+                background-color: transparent;
+                border-image: none;
+                image: none;
+            }
             QTreeView::branch:has-children:closed,
             QTreeView::branch:has-children:closed:has-siblings,
             QTreeWidget::branch:has-children:closed,
