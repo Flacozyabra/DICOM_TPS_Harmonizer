@@ -4,10 +4,12 @@ import os
 import sys
 import platform
 import threading
+import urllib.request
+import re
 from pathlib import Path
 from typing import Any, Dict
 
-from PyQt6.QtCore import Qt, QObject, pyqtSignal, QSize, QPoint, QByteArray
+from PyQt6.QtCore import Qt, QObject, pyqtSignal, QSize, QPoint, QByteArray, QThread
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFrame,
     QLabel, QPushButton, QLineEdit, QCheckBox, QProgressBar,
@@ -184,6 +186,96 @@ class CustomQuestionDialog(QDialog):
         set_dark_titlebar(self)
 
 
+class UpdateDialog(QDialog):
+    """Кастомный диалог с вопросом об обновлении версии."""
+
+    def __init__(self, parent: QWidget, new_version: str) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(parent.loc("update_title"))
+        self.setFixedSize(420, 160)
+        self.setModal(True)
+        self.result_value = None
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        # Форматируем сообщение с версией
+        message = parent.loc("update_message").format(new_version)
+        lbl = QLabel(message, self)
+        lbl.setWordWrap(True)
+        lbl.setStyleSheet("font-size: 13px; color: #E5E7EB;")
+        layout.addWidget(lbl)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(10)
+
+        # Тексты кнопок
+        text_yes = parent.loc("yes")
+        text_no = parent.loc("no")
+        text_skip = parent.loc("dont_show_again")
+
+        btn_yes = QPushButton(text_yes, self)
+        btn_yes.clicked.connect(lambda: self.finish("yes"))
+        btn_layout.addWidget(btn_yes)
+
+        btn_no = QPushButton(text_no, self)
+        btn_no.clicked.connect(lambda: self.finish("no"))
+        btn_layout.addWidget(btn_no)
+
+        btn_skip = QPushButton(text_skip, self)
+        btn_skip.clicked.connect(lambda: self.finish("skip"))
+        btn_layout.addWidget(btn_skip)
+
+        layout.addLayout(btn_layout)
+
+    def finish(self, val: str) -> None:
+        self.result_value = val
+        self.accept()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        set_dark_titlebar(self)
+
+
+class UpdateCheckerThread(QThread):
+    """Поток для проверки обновлений с GitHub в фоне, чтобы избежать зависания."""
+    update_available = pyqtSignal(str, str) # tag_name, html_url
+
+    def __init__(self, current_version: str) -> None:
+        super().__init__()
+        self.current_version = current_version
+
+    def run(self) -> None:
+        url = "https://api.github.com/repos/Flacozyabra/DICOM_TPS_Harmonizer/releases/latest"
+        req = urllib.request.Request(
+            url,
+            headers={'User-Agent': 'DICOM-TPS-Harmonizer-Updater'}
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=3.0) as response:
+                if response.status == 200:
+                    data = json.loads(response.read().decode('utf-8'))
+                    tag_name = data.get("tag_name", "")
+                    html_url = data.get("html_url", "https://github.com/Flacozyabra/DICOM_TPS_Harmonizer/releases")
+                    if tag_name:
+                        if self.is_newer(tag_name, self.current_version):
+                            self.update_available.emit(tag_name, html_url)
+        except Exception:
+            pass
+
+    def is_newer(self, latest: str, current: str) -> bool:
+        def parse_version(v: str) -> tuple[int, ...]:
+            v_clean = re.sub(r'[^\d.]', '', v)
+            parts = v_clean.split('.')
+            while len(parts) < 3:
+                parts.append('0')
+            try:
+                return tuple(int(x) for x in parts[:3])
+            except ValueError:
+                return (0, 0, 0)
+        return parse_version(latest) > parse_version(current)
+
+
 class PatientEditDialog(QDialog):
     """Диалог для интерактивной коррекции имени и ID пациента."""
 
@@ -356,6 +448,56 @@ class DicomSplitterApp(QMainWindow):
         self.update_locale_texts()
         self.center_on_screen()
         self.restore_window_state()
+
+        self.VERSION = "1.1.0"
+        self.check_updates()
+
+    def check_updates(self) -> None:
+        """Запускает фоновый поток для проверки обновлений с GitHub."""
+        config_file = self.get_config_path()
+        if config_file.exists():
+            try:
+                with open(config_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if data.get("skip_update_check", False):
+                        return
+            except Exception:
+                pass
+
+        self.update_thread = UpdateCheckerThread(self.VERSION)
+        self.update_thread.update_available.connect(self.on_update_available)
+        self.update_thread.start()
+
+    def on_update_available(self, new_version: str, release_url: str) -> None:
+        """Показывает диалог предложения обновить программу при обнаружении новой версии."""
+        dialog = UpdateDialog(self, new_version)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            result = dialog.result_value
+            if result == "yes":
+                import webbrowser
+                try:
+                    webbrowser.open(release_url)
+                except Exception:
+                    pass
+            elif result == "skip":
+                self.save_skip_update_check()
+
+    def save_skip_update_check(self) -> None:
+        """Сохраняет флаг отключения проверки обновлений в config.json."""
+        config_file = self.get_config_path()
+        config_data = {}
+        if config_file.exists():
+            try:
+                with open(config_file, "r", encoding="utf-8") as f:
+                    config_data = json.load(f)
+            except Exception:
+                pass
+        config_data["skip_update_check"] = True
+        try:
+            with open(config_file, "w", encoding="utf-8") as f:
+                json.dump(config_data, f, ensure_ascii=False, indent=4)
+        except Exception:
+            pass
 
     def get_config_path(self) -> Path:
         """Возвращает путь к файлу конфигурации в AppData пользователя."""
