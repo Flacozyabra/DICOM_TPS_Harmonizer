@@ -99,5 +99,12 @@
     "dont_show_again": "Не показывать больше",
     "viewer_close": "Закрыть просмотр",
     "viewer_slice": "Срез: {} / {}",
-    "viewer_no_pixels": "Нет пиксельных данных"
+    "viewer_no_pixels": "Нет пиксельных данных",
+    "preset_dicom": "По умолчанию (DICOM)",
+    "preset_soft": "Мягкие ткани",
+    "preset_bone": "Кости",
+    "preset_lung": "Легкие",
+    "preset_brain": "Мозг",
+    "tooltip_ruler": "Включить/выключить линейку",
+    "tooltip_hu": "Настройка окна HU (контрастность)"
 }

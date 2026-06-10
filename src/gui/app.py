@@ -282,6 +282,7 @@ class UpdateCheckerThread(QThread):
 class DicomViewerWidget(QWidget):
     """Виджет для отрисовки DICOM-изображения и линейки."""
     slice_scrolled = pyqtSignal(int)  # -1 или 1 для прокрутки колесиком мыши
+    window_changed = pyqtSignal(float, float) # новые window_width, window_center
 
     def __init__(self, parent: QWidget = None) -> None:
         super().__init__(parent)
@@ -289,10 +290,29 @@ class DicomViewerWidget(QWidget):
         self.current_dataset = None
         self.image_rect = None
 
-        # Состояния линейки
+        # Параметры окна HU
+        self.window_width = 400.0
+        self.window_center = 40.0
+
+        # Управление зумом и панорамированием
+        self.zoom_factor = 1.0
+        self.pan_offset = QPointF(0, 0)
+        self.last_mouse_pos = None
+
+        # Режимы работы левой кнопки мыши
+        self.ruler_active = False
+        self.hu_active = False
+
+        # Состояния рисования линейки
         self.start_pos = None
         self.current_pos = None
         self.drawing_line = False
+
+        # Состояние изменения окна
+        self.windowing_active = False
+
+        # Состояние панорамирования (Pan)
+        self.pan_active = False
 
         self.setMouseTracking(True)
         self.setStyleSheet("background-color: #000000;")
@@ -302,38 +322,93 @@ class DicomViewerWidget(QWidget):
         self.current_dataset = ds
         self.update()
 
+    def set_window_params(self, width: float, center: float) -> None:
+        self.window_width = width
+        self.window_center = center
+        self.update()
+
     def clear_viewer(self) -> None:
         self.current_pixmap = None
         self.current_dataset = None
         self.start_pos = None
         self.current_pos = None
         self.drawing_line = False
+        self.windowing_active = False
+        self.pan_active = False
+        self.zoom_factor = 1.0
+        self.pan_offset = QPointF(0, 0)
         self.update()
 
     def mousePressEvent(self, event) -> None:
-        if event.button() == Qt.MouseButton.LeftButton and self.current_pixmap:
-            self.start_pos = event.position()
-            self.current_pos = event.position()
-            self.drawing_line = True
-            self.update()
+        if not self.current_pixmap:
+            return
+
+        btn = event.button()
+        if btn in (Qt.MouseButton.MiddleButton, Qt.MouseButton.RightButton):
+            # Панорамирование (Pan) при зажатии средней или правой кнопки мыши
+            self.pan_active = True
+            self.last_mouse_pos = event.position()
+        elif btn == Qt.MouseButton.LeftButton:
+            if self.ruler_active:
+                # Рисование линейки
+                self.start_pos = event.position()
+                self.current_pos = event.position()
+                self.drawing_line = True
+                self.update()
+            elif self.hu_active:
+                # Изменение окна HU
+                self.windowing_active = True
+                self.last_mouse_pos = event.position()
 
     def mouseMoveEvent(self, event) -> None:
-        if self.drawing_line:
+        if self.pan_active and self.last_mouse_pos:
+            delta = event.position() - self.last_mouse_pos
+            self.pan_offset += delta
+            self.last_mouse_pos = event.position()
+            self.update()
+        elif self.drawing_line:
             self.current_pos = event.position()
             self.update()
+        elif self.windowing_active and self.last_mouse_pos:
+            delta = event.position() - self.last_mouse_pos
+            self.last_mouse_pos = event.position()
+            
+            # По горизонтали меняем ширину окна (Width), по вертикали - уровень (Center)
+            self.window_width = max(1.0, self.window_width + delta.x() * 2.0)
+            self.window_center = self.window_center + delta.y() * 2.0
+            self.window_changed.emit(self.window_width, self.window_center)
 
     def mouseReleaseEvent(self, event) -> None:
-        if event.button() == Qt.MouseButton.LeftButton and self.drawing_line:
-            self.current_pos = event.position()
-            self.drawing_line = False
-            self.update()
+        btn = event.button()
+        if btn in (Qt.MouseButton.MiddleButton, Qt.MouseButton.RightButton):
+            self.pan_active = False
+        elif btn == Qt.MouseButton.LeftButton:
+            if self.drawing_line:
+                self.current_pos = event.position()
+                self.drawing_line = False
+                self.update()
+            elif self.windowing_active:
+                self.windowing_active = False
 
     def wheelEvent(self, event) -> None:
-        delta = event.angleDelta().y()
-        if delta > 0:
-            self.slice_scrolled.emit(-1)
-        elif delta < 0:
-            self.slice_scrolled.emit(1)
+        modifiers = QApplication.keyboardModifiers()
+        if modifiers == Qt.KeyboardModifier.ControlModifier:
+            # Масштабирование по Ctrl + колесо мыши
+            delta = event.angleDelta().y()
+            if delta > 0:
+                # Колесо вперед (от себя) -> уменьшение
+                self.zoom_factor = max(0.1, self.zoom_factor - 0.1)
+            elif delta < 0:
+                # Колесо назад (на себя) -> увеличение
+                self.zoom_factor = min(10.0, self.zoom_factor + 0.1)
+            self.update()
+        else:
+            # Обычная прокрутка колесиком -> смена срезов
+            delta = event.angleDelta().y()
+            if delta > 0:
+                self.slice_scrolled.emit(-1)
+            elif delta < 0:
+                self.slice_scrolled.emit(1)
 
     def to_image_coords(self, pt: QPointF) -> tuple[float, float]:
         if not self.image_rect or not self.current_pixmap:
@@ -368,18 +443,19 @@ class DicomViewerWidget(QWidget):
             w = self.width()
             h = self.height()
 
-            scale = min(w / pix_w, h / pix_h)
+            scale = min(w / pix_w, h / pix_h) * self.zoom_factor
             view_w = int(pix_w * scale)
             view_h = int(pix_h * scale)
 
-            offset_x = (w - view_w) // 2
-            offset_y = (h - view_h) // 2
+            # Центр виджета + смещение панорамирования
+            offset_x = (w - view_w) // 2 + int(self.pan_offset.x())
+            offset_y = (h - view_h) // 2 + int(self.pan_offset.y())
 
             self.image_rect = QRect(offset_x, offset_y, view_w, view_h)
             painter.drawPixmap(self.image_rect, self.current_pixmap)
 
             # Отрисовка измерительной линейки
-            if self.start_pos and self.current_pos:
+            if self.ruler_active and self.start_pos and self.current_pos:
                 pen = QPen(QColor("#10B981"), 2, Qt.PenStyle.SolidLine)
                 painter.setPen(pen)
                 painter.drawLine(self.start_pos.toPoint(), self.current_pos.toPoint())
@@ -422,6 +498,20 @@ class DicomViewerWidget(QWidget):
                 painter.setPen(QColor("#FFFFFF"))
                 painter.drawText(rect_text, Qt.AlignmentFlag.AlignCenter, text)
 
+            # Вывод параметров окна HU и Zoom в левый нижний угол
+            painter.setFont(QFont("Consolas", 10, QFont.Weight.Bold))
+            painter.setPen(QColor("#9CA3AF"))
+            info_text = f"W: {int(self.window_width)} L: {int(self.window_center)} | Zoom: {int(self.zoom_factor * 100)}%"
+            
+            # Подложка под системную плашку
+            metrics = painter.fontMetrics()
+            rect_info = metrics.boundingRect(info_text)
+            rect_info.moveBottomLeft(QPoint(15, self.height() - 15))
+            painter.fillRect(rect_info.adjusted(-4, -2, 4, 2), QColor(0, 0, 0, 150))
+            
+            painter.setPen(QColor("#E5E7EB"))
+            painter.drawText(rect_info, Qt.AlignmentFlag.AlignLeft, info_text)
+
     def draw_tick(self, painter: QPainter, pt1: QPointF, pt2: QPointF) -> None:
         dx = pt2.x() - pt1.x()
         dy = pt2.y() - pt1.y()
@@ -448,6 +538,12 @@ class DicomViewerPanel(QWidget):
         self.current_index = -1
         self.is_loading = False
 
+        # Параметры окна по умолчанию
+        self.window_width = 400.0
+        self.window_center = 40.0
+        self.default_wc = 40.0
+        self.default_ww = 400.0
+
         self.setup_ui()
 
     def setup_ui(self) -> None:
@@ -455,7 +551,9 @@ class DicomViewerPanel(QWidget):
         layout.setContentsMargins(15, 10, 15, 10)
         layout.setSpacing(10)
 
+        # 1. Верхняя панель (Информация о серии, Кнопка линейки, Кнопка HU, Выбор пресетов, Кнопка закрыть)
         top_layout = QHBoxLayout()
+        top_layout.setSpacing(10)
         
         self.lbl_info = QLabel(self)
         self.lbl_info.setStyleSheet("font-size: 13px; font-weight: bold; color: #FFFFFF;")
@@ -463,6 +561,50 @@ class DicomViewerPanel(QWidget):
 
         top_layout.addStretch()
 
+        # Выпадающий список пресетов HU
+        self.cb_presets = QComboBox(self)
+        self.cb_presets.setFixedWidth(160)
+        self.cb_presets.setStyleSheet("""
+            QComboBox {
+                background-color: #2A2A2A;
+                border: 1px solid #374151;
+                border-radius: 4px;
+                color: #FFFFFF;
+                padding: 4px 8px;
+                font-size: 12px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #1A1A1A;
+                border: 1px solid #374151;
+                color: #FFFFFF;
+                selection-background-color: #3B82F6;
+            }
+        """)
+        top_layout.addWidget(self.cb_presets)
+
+        # Создаем программные иконки
+        self.img_ruler = self.create_ruler_icon()
+        self.img_hu = self.create_hu_icon()
+
+        # Кнопка линейки
+        self.btn_ruler = QPushButton(self)
+        self.btn_ruler.setIcon(self.img_ruler)
+        self.btn_ruler.setIconSize(QSize(20, 20))
+        self.btn_ruler.setToolTip(self.parent_app.loc("tooltip_ruler") if hasattr(self.parent_app, "loc") else "Линейка")
+        self.btn_ruler.clicked.connect(self.toggle_ruler)
+        top_layout.addWidget(self.btn_ruler)
+
+        # Кнопка настройки HU
+        self.btn_hu = QPushButton(self)
+        self.btn_hu.setIcon(self.img_hu)
+        self.btn_hu.setIconSize(QSize(20, 20))
+        self.btn_hu.setToolTip(self.parent_app.loc("tooltip_hu") if hasattr(self.parent_app, "loc") else "Настройка окна HU")
+        self.btn_hu.clicked.connect(self.toggle_hu)
+        top_layout.addWidget(self.btn_hu)
+
+        self.update_buttons_style()
+
+        # Кнопка закрытия
         self.btn_close = QPushButton(self.parent_app.loc("viewer_close"), self)
         self.btn_close.clicked.connect(self.close_requested.emit)
         self.btn_close.setStyleSheet("""
@@ -478,13 +620,16 @@ class DicomViewerPanel(QWidget):
             }
         """)
         top_layout.addWidget(self.btn_close)
+        
         layout.addLayout(top_layout)
 
+        # 2. Центральная область (Изображение + Слайдер)
         main_layout = QHBoxLayout()
         main_layout.setSpacing(15)
 
         self.viewer = DicomViewerWidget(self)
         self.viewer.slice_scrolled.connect(self.on_slice_scrolled)
+        self.viewer.window_changed.connect(self.on_window_changed)
         main_layout.addWidget(self.viewer, stretch=1)
 
         self.slider = QSlider(Qt.Orientation.Vertical, self)
@@ -511,10 +656,119 @@ class DicomViewerPanel(QWidget):
 
         layout.addLayout(main_layout)
 
+        # 3. Нижняя информационная плашка
         self.lbl_status = QLabel(self)
         self.lbl_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_status.setStyleSheet("font-size: 12px; color: #9CA3AF; font-weight: bold;")
         layout.addWidget(self.lbl_status)
+
+        # Инициализируем локализованные пресеты
+        self.retranslate_ui()
+        self.cb_presets.currentIndexChanged.connect(self.apply_preset)
+
+    def retranslate_ui(self) -> None:
+        self.cb_presets.blockSignals(True)
+        self.cb_presets.clear()
+        self.cb_presets.addItem(self.parent_app.loc("preset_dicom"), "dicom")
+        self.cb_presets.addItem(self.parent_app.loc("preset_soft"), "soft")
+        self.cb_presets.addItem(self.parent_app.loc("preset_bone"), "bone")
+        self.cb_presets.addItem(self.parent_app.loc("preset_lung"), "lung")
+        self.cb_presets.addItem(self.parent_app.loc("preset_brain"), "brain")
+        self.cb_presets.blockSignals(False)
+
+        self.btn_ruler.setToolTip(self.parent_app.loc("tooltip_ruler") if hasattr(self.parent_app, "loc") else "Линейка")
+        self.btn_hu.setToolTip(self.parent_app.loc("tooltip_hu") if hasattr(self.parent_app, "loc") else "Настройка окна HU")
+
+    def create_ruler_icon(self) -> QIcon:
+        pixmap = QPixmap(24, 24)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        pen = QPen(QColor("#FFFFFF"), 2)
+        painter.setPen(pen)
+        painter.drawLine(3, 21, 21, 3)
+        
+        painter.drawLine(1, 19, 5, 23)
+        painter.drawLine(19, 1, 23, 5)
+        
+        pen_ticks = QPen(QColor("#3B82F6"), 1.5)
+        painter.setPen(pen_ticks)
+        painter.drawLine(6, 18, 9, 21)
+        painter.drawLine(12, 12, 15, 15)
+        painter.drawLine(18, 6, 21, 9)
+        
+        painter.end()
+        return QIcon(pixmap)
+
+    def create_hu_icon(self) -> QIcon:
+        pixmap = QPixmap(24, 24)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        painter.setPen(QPen(QColor("#FFFFFF"), 2))
+        painter.setBrush(QBrush(QColor("#FFFFFF")))
+        painter.drawChord(2, 2, 20, 20, -90 * 16, 180 * 16)
+        
+        painter.setBrush(QBrush(Qt.GlobalColor.transparent))
+        painter.drawChord(2, 2, 20, 20, 90 * 16, 180 * 16)
+        
+        painter.end()
+        return QIcon(pixmap)
+
+    def update_buttons_style(self) -> None:
+        style_ruler_active = """
+            QPushButton {
+                background-color: #3B82F6;
+                border: 1px solid #60A5FA;
+                border-radius: 4px;
+                min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px;
+            }
+        """
+        style_ruler_inactive = """
+            QPushButton {
+                background-color: #374151;
+                border: 1px solid #4B5563;
+                border-radius: 4px;
+                min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px;
+            }
+            QPushButton:hover { background-color: #4B5563; }
+        """
+        style_hu_active = """
+            QPushButton {
+                background-color: #10B981;
+                border: 1px solid #34D399;
+                border-radius: 4px;
+                min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px;
+            }
+        """
+        style_hu_inactive = """
+            QPushButton {
+                background-color: #374151;
+                border: 1px solid #4B5563;
+                border-radius: 4px;
+                min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px;
+            }
+            QPushButton:hover { background-color: #4B5563; }
+        """
+
+        self.btn_ruler.setStyleSheet(style_ruler_active if self.viewer.ruler_active else style_ruler_inactive)
+        self.btn_hu.setStyleSheet(style_hu_active if self.viewer.hu_active else style_hu_inactive)
+
+    def toggle_ruler(self) -> None:
+        active = not self.viewer.ruler_active
+        self.viewer.ruler_active = active
+        if active:
+            self.viewer.hu_active = False
+        self.update_buttons_style()
+
+    def toggle_hu(self) -> None:
+        active = not self.viewer.hu_active
+        self.viewer.hu_active = active
+        if active:
+            self.viewer.ruler_active = False
+        self.update_buttons_style()
 
     def load_series(self, files: list[str]) -> None:
         import pydicom
@@ -523,10 +777,21 @@ class DicomViewerPanel(QWidget):
         self.current_index = -1
         self.viewer.clear_viewer()
 
+        # По умолчанию сбрасываем пресеты в "dicom"
+        self.cb_presets.blockSignals(True)
+        self.cb_presets.setCurrentIndex(0)
+        self.cb_presets.blockSignals(False)
+
         slices = []
         for f in files:
             try:
+                # Быстрое сканирование тегов для сортировки
                 ds = pydicom.dcmread(f, stop_before_pixels=True)
+                
+                # Фильтруем файлы без пиксельных данных сразу при загрузке
+                if 0x7FE00010 not in ds:
+                    continue
+                
                 ipp = getattr(ds, "ImagePositionPatient", None)
                 z_coord = float(ipp[2]) if ipp and len(ipp) >= 3 else 0.0
                 instance_number = int(getattr(ds, "InstanceNumber", 0))
@@ -535,11 +800,12 @@ class DicomViewerPanel(QWidget):
                 pass
 
         if not slices:
-            self.lbl_info.setText("Ошибка загрузки серии.")
+            self.lbl_info.setText("Серия не содержит корректных DICOM файлов.")
             self.lbl_status.setText("")
             self.is_loading = False
             return
 
+        # Сортируем срезы по Z-координате
         slices.sort(key=lambda x: (x[1], x[2]))
         self.sorted_files = [x[0] for x in slices]
 
@@ -558,7 +824,34 @@ class DicomViewerPanel(QWidget):
         filepath = self.sorted_files[index]
         import pydicom
         try:
+            # Читаем файл
             ds = pydicom.dcmread(filepath)
+            
+            # Извлекаем и проверяем наличие пиксельного массива
+            if not hasattr(ds, "pixel_array"):
+                raise ValueError("No pixel array tag in file")
+
+            # Извлекаем параметры окна по умолчанию при первой загрузке серии
+            if self.current_index == 0:
+                self.default_wc = 40.0
+                self.default_ww = 400.0
+                wc = getattr(ds, "WindowCenter", None)
+                ww = getattr(ds, "WindowWidth", None)
+                if wc is not None and ww is not None:
+                    try:
+                        c_val = wc[0] if hasattr(wc, "__iter__") else wc
+                        w_val = ww[0] if hasattr(ww, "__iter__") else ww
+                        self.default_wc = float(c_val)
+                        self.default_ww = float(w_val)
+                    except Exception:
+                        pass
+                
+                # При первом запуске серии используем DICOM пресет
+                preset_data = self.cb_presets.currentData()
+                if preset_data == "dicom":
+                    self.window_center = self.default_wc
+                    self.window_width = self.default_ww
+
             pat_name = getattr(ds, "PatientName", "Unknown")
             pat_id = getattr(ds, "PatientID", "Unknown")
             study_desc = getattr(ds, "StudyDescription", "")
@@ -568,13 +861,26 @@ class DicomViewerPanel(QWidget):
             self.lbl_info.setText(info_text)
             self.lbl_status.setText(self.parent_app.loc("viewer_slice", index + 1, len(self.sorted_files)))
 
-            pixmap = self.dicom_to_pixmap(ds)
+            pixmap = self.dicom_to_pixmap(ds, self.window_width, self.window_center)
             if pixmap:
                 self.viewer.set_dicom_image(pixmap, ds)
+                self.viewer.set_window_params(self.window_width, self.window_center)
             else:
-                self.lbl_info.setText(self.parent_app.loc("viewer_no_pixels"))
+                raise ValueError("Failed to decode pixel array to pixmap")
+                
         except Exception as e:
-            self.lbl_info.setText(f"Ошибка чтения среза: {str(e)}")
+            # Автоматическая защита от битых файлов: выбрасываем его из списка и пробуем открыть тот же индекс
+            print(f"[Viewer] Skipping corrupted file {filepath}: {str(e)}")
+            self.sorted_files.pop(index)
+            if not self.sorted_files:
+                self.lbl_info.setText("Нет доступных изображений в серии.")
+                self.lbl_status.setText("")
+                self.viewer.clear_viewer()
+                return
+
+            self.slider.setRange(0, len(self.sorted_files) - 1)
+            new_index = min(index, len(self.sorted_files) - 1)
+            self.set_current_slice(new_index)
 
     def on_slider_changed(self, value: int) -> None:
         if not self.is_loading and value != self.current_index:
@@ -585,7 +891,47 @@ class DicomViewerPanel(QWidget):
         if 0 <= new_index < len(self.sorted_files):
             self.set_current_slice(new_index)
 
-    def dicom_to_pixmap(self, ds) -> QPixmap | None:
+    def on_window_changed(self, width: float, center: float) -> None:
+        self.window_width = width
+        self.window_center = center
+        self.update_current_slice_pixels()
+
+    def update_current_slice_pixels(self) -> None:
+        if self.current_index < 0 or self.current_index >= len(self.sorted_files):
+            return
+        filepath = self.sorted_files[self.current_index]
+        import pydicom
+        try:
+            ds = pydicom.dcmread(filepath)
+            pixmap = self.dicom_to_pixmap(ds, self.window_width, self.window_center)
+            if pixmap:
+                self.viewer.set_dicom_image(pixmap, ds)
+                self.viewer.set_window_params(self.window_width, self.window_center)
+        except Exception:
+            pass
+
+    def apply_preset(self, index: int) -> None:
+        preset_type = self.cb_presets.itemData(index)
+        
+        if preset_type == "dicom":
+            self.window_width = self.default_ww
+            self.window_center = self.default_wc
+        elif preset_type == "soft":
+            self.window_width = 400.0
+            self.window_center = 40.0
+        elif preset_type == "bone":
+            self.window_width = 1500.0
+            self.window_center = 300.0
+        elif preset_type == "lung":
+            self.window_width = 1500.0
+            self.window_center = -600.0
+        elif preset_type == "brain":
+            self.window_width = 80.0
+            self.window_center = 40.0
+
+        self.update_current_slice_pixels()
+
+    def dicom_to_pixmap(self, ds, window_width: float, window_center: float) -> QPixmap | None:
         try:
             import numpy as np
             if not hasattr(ds, "pixel_array"):
@@ -600,20 +946,6 @@ class DicomViewerPanel(QWidget):
             slope = float(getattr(ds, "RescaleSlope", 1.0))
             intercept = float(getattr(ds, "RescaleIntercept", 0.0))
             arr = arr * slope + intercept
-
-            window_center = 40.0
-            window_width = 400.0
-
-            wc = getattr(ds, "WindowCenter", None)
-            ww = getattr(ds, "WindowWidth", None)
-            if wc is not None and ww is not None:
-                try:
-                    c_val = wc[0] if hasattr(wc, "__iter__") else wc
-                    w_val = ww[0] if hasattr(ww, "__iter__") else ww
-                    window_center = float(c_val)
-                    window_width = float(w_val)
-                except Exception:
-                    pass
 
             min_val = window_center - window_width / 2.0
             max_val = window_center + window_width / 2.0

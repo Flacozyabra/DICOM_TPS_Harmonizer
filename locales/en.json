@@ -99,5 +99,12 @@
     "dont_show_again": "Don't show again",
     "viewer_close": "Close Viewer",
     "viewer_slice": "Slice: {} / {}",
-    "viewer_no_pixels": "No pixel data"
+    "viewer_no_pixels": "No pixel data",
+    "preset_dicom": "Default (DICOM)",
+    "preset_soft": "Soft Tissue",
+    "preset_bone": "Bone",
+    "preset_lung": "Lung",
+    "preset_brain": "Brain",
+    "tooltip_ruler": "Toggle ruler",
+    "tooltip_hu": "Adjust HU window (contrast)"
 }
