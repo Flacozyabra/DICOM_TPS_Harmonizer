@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
     QLabel, QPushButton, QLineEdit, QCheckBox, QProgressBar,
     QTextEdit, QTreeWidget, QTreeWidgetItem, QFileDialog, QDialog,
     QGridLayout, QMessageBox, QApplication, QSplitter, QSizePolicy,
-    QSlider, QStackedWidget
+    QSlider, QStackedWidget, QComboBox
 )
 from PyQt6.QtGui import QIcon, QFont, QTextCursor, QPixmap, QBrush, QColor, QPainter, QPen, QImage
 
@@ -602,8 +602,6 @@ class DicomViewerPanel(QWidget):
         self.btn_hu.clicked.connect(self.toggle_hu)
         top_layout.addWidget(self.btn_hu)
 
-        self.update_buttons_style()
-
         # Кнопка закрытия
         self.btn_close = QPushButton(self.parent_app.loc("viewer_close"), self)
         self.btn_close.clicked.connect(self.close_requested.emit)
@@ -663,6 +661,7 @@ class DicomViewerPanel(QWidget):
         layout.addWidget(self.lbl_status)
 
         # Инициализируем локализованные пресеты
+        self.update_buttons_style()
         self.retranslate_ui()
         self.cb_presets.currentIndexChanged.connect(self.apply_preset)
 
