@@ -290,6 +290,10 @@ class DicomViewerWidget(QWidget):
         self.current_dataset = None
         self.image_rect = None
 
+        # Сведения о срезах для OSD-оверлея
+        self.current_slice = 0
+        self.total_slices = 0
+
         # Параметры окна HU
         self.window_width = 400.0
         self.window_center = 40.0
@@ -328,6 +332,11 @@ class DicomViewerWidget(QWidget):
         self.window_center = center
         self.update()
 
+    def set_slice_info(self, current: int, total: int) -> None:
+        self.current_slice = current
+        self.total_slices = total
+        self.update()
+
     def clear_viewer(self) -> None:
         self.current_pixmap = None
         self.current_dataset = None
@@ -339,6 +348,8 @@ class DicomViewerWidget(QWidget):
         self.pan_active = False
         self.zoom_factor = 1.0
         self.pan_offset = QPointF(0, 0)
+        self.current_slice = 0
+        self.total_slices = 0
         self.update()
 
     def mousePressEvent(self, event) -> None:
@@ -601,7 +612,9 @@ class DicomViewerWidget(QWidget):
                     lines_bottom.append(f"Modality: {modality}")
                 
                 try:
-                    ts_uid = self.current_dataset.file_meta.TransferSyntaxUID
+                    ts_uid = getattr(self.current_dataset, "original_transfer_syntax", None)
+                    if not ts_uid:
+                        ts_uid = self.current_dataset.file_meta.TransferSyntaxUID
                     ts_name = ts_uid.name
                     if " (" in ts_name:
                         ts_name = ts_name.split(" (")[0]
@@ -618,6 +631,22 @@ class DicomViewerWidget(QWidget):
                 painter.setPen(QColor("#E5E7EB"))
                 painter.drawText(rect_info, Qt.AlignmentFlag.AlignLeft, line)
                 y_offset_b -= rect_info.height() + 5
+
+            # Отрисовка номера среза в правом нижнем углу
+            if self.total_slices > 0:
+                painter.setFont(QFont("Consolas", 10, QFont.Weight.Bold))
+                slice_info = ""
+                if hasattr(self, "parent") and hasattr(self.parent(), "parent_app"):
+                    slice_info = self.parent().parent_app.loc("viewer_slice", self.current_slice, self.total_slices)
+                else:
+                    slice_info = f"Slice: {self.current_slice} / {self.total_slices}"
+                
+                metrics_r = painter.fontMetrics()
+                rect_slice = metrics_r.boundingRect(slice_info)
+                rect_slice.moveBottomRight(QPoint(self.width() - 15, self.height() - 15))
+                painter.fillRect(rect_slice.adjusted(-4, -2, 4, 2), QColor(0, 0, 0, 150))
+                painter.setPen(QColor("#E5E7EB"))
+                painter.drawText(rect_slice, Qt.AlignmentFlag.AlignRight, slice_info)
 
     def draw_tick(self, painter: QPainter, pt1: QPointF, pt2: QPointF) -> None:
         dx = pt2.x() - pt1.x()
@@ -655,8 +684,8 @@ class DicomViewerPanel(QWidget):
 
     def setup_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(15, 10, 15, 10)
-        layout.setSpacing(10)
+        layout.setContentsMargins(15, 10, 15, 0)
+        layout.setSpacing(6)
 
         # 1.  Верхняя панель (Информация о серии, Кнопка линейки, Кнопка HU, Выбор пресетов, Кнопка закрыть)
         top_layout = QHBoxLayout()
@@ -765,12 +794,6 @@ class DicomViewerPanel(QWidget):
             }
         """)
         layout.addWidget(self.slider)
-
-        # 3.  Нижняя информационная плашка
-        self.lbl_status = QLabel(self)
-        self.lbl_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_status.setStyleSheet("font-size: 12px; color: #9CA3AF; font-weight: bold;")
-        layout.addWidget(self.lbl_status)
 
         # Инициализируем локализованные пресеты
         self.update_buttons_style()
@@ -996,7 +1019,7 @@ class DicomViewerPanel(QWidget):
 
         if not slices:
             self.lbl_info.setText("Серия не содержит корректных DICOM файлов.")
-            self.lbl_status.setText("")
+            self.viewer.set_slice_info(0, 0)
             self.is_loading = False
             return
 
@@ -1122,7 +1145,7 @@ class DicomViewerPanel(QWidget):
             
             info_text = f"{pat_name} [{pat_id}] | {study_desc} | {series_desc}"
             self.lbl_info.setText(info_text)
-            self.lbl_status.setText(self.parent_app.loc("viewer_slice", index + 1, len(self.sorted_files)))
+            self.viewer.set_slice_info(index + 1, len(self.sorted_files))
 
             pixmap = self.dicom_to_pixmap(ds, self.window_width, self.window_center)
             if pixmap:
@@ -1137,7 +1160,7 @@ class DicomViewerPanel(QWidget):
             self.sorted_files.pop(index)
             if not self.sorted_files:
                 self.lbl_info.setText("Нет доступных изображений в серии.")
-                self.lbl_status.setText("")
+                self.viewer.set_slice_info(0, 0)
                 self.viewer.clear_viewer()
                 return
 
@@ -1214,6 +1237,10 @@ class DicomViewerPanel(QWidget):
             import numpy as np
             if not hasattr(ds, "pixel_array"):
                 return None
+
+            original_ts = getattr(ds.file_meta, "TransferSyntaxUID", None)
+            if original_ts and not hasattr(ds, "original_transfer_syntax"):
+                ds.original_transfer_syntax = original_ts
 
             try:
                 ds.decompress()
@@ -1917,7 +1944,7 @@ class DicomSplitterApp(QMainWindow):
         # Настройки сплиттеров
         self.splitter.setCollapsible(0, True)   # Дерево может быть скрыто полностью
         self.splitter.setCollapsible(1, False)  # Главную панель скрывать нельзя
-        self.splitter.setSizes([220, 880])      # Пропорции по умолчанию (220px ширина дерева)
+        self.splitter.setSizes([280, 820])      # Пропорции по умолчанию (280px ширина дерева)
         self.splitter.setStretchFactor(0, 1)    # Дерево проводника растягивается при увеличении окна
         self.splitter.setStretchFactor(1, 0)    # Правая область сохраняет свой размер
 
@@ -1960,13 +1987,82 @@ class DicomSplitterApp(QMainWindow):
                 border-radius: 6px;
                 padding: 5px;
             }
-            QTreeView::branch:has-children:closed {
+            QTreeView::branch:has-children:closed,
+            QTreeView::branch:has-children:closed:has-siblings,
+            QTreeWidget::branch:has-children:closed,
+            QTreeWidget::branch:has-children:closed:has-siblings {
                 border-image: none;
                 image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiNGRkZGRkYiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNOSA1bDcgNy03IDciLz48L3N2Zz4=);
             }
-            QTreeView::branch:has-children:open {
+            QTreeView::branch:has-children:open,
+            QTreeView::branch:has-children:open:has-siblings,
+            QTreeWidget::branch:has-children:open,
+            QTreeWidget::branch:has-children:open:has-siblings {
                 border-image: none;
                 image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiMzQjgyRjYiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNiA5bDYgNiA2LTYiLz48L3N2Zz4=);
+            }
+            QTreeWidget::indicator, QTreeView::indicator {
+                width: 14px;
+                height: 14px;
+                border: 1px solid #4B5563;
+                border-radius: 3px;
+                background-color: #121212;
+            }
+            QTreeWidget::indicator:hover, QTreeView::indicator:hover {
+                border-color: #3B82F6;
+            }
+            QTreeWidget::indicator:checked, QTreeView::indicator:checked {
+                background-color: #2563EB;
+                border-color: #2563EB;
+                image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjQiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBvbHlsaW5lIHBvaW50cz0iMjAgNiA5IDE3IDQgMTIiPjwvcG9seWxpbmU+PC9zdmc+);
+            }
+            QTreeWidget::indicator:unchecked, QTreeView::indicator:unchecked {
+                background-color: #121212;
+                border-color: #4B5563;
+            }
+            QScrollBar:vertical {
+                border: none;
+                background: #121212;
+                width: 10px;
+                margin: 0px 0px 0px 0px;
+            }
+            QScrollBar::handle:vertical {
+                background: #374151;
+                min-height: 20px;
+                border-radius: 5px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #4B5563;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                border: none;
+                background: none;
+                height: 0px;
+            }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                background: none;
+            }
+            QScrollBar:horizontal {
+                border: none;
+                background: #121212;
+                height: 10px;
+                margin: 0px 0px 0px 0px;
+            }
+            QScrollBar::handle:horizontal {
+                background: #374151;
+                min-width: 20px;
+                border-radius: 5px;
+            }
+            QScrollBar::handle:horizontal:hover {
+                background: #4B5563;
+            }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+                border: none;
+                background: none;
+                width: 0px;
+            }
+            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+                background: none;
             }
             QTreeWidget::item {
                 padding: 6px 4px;
