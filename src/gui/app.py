@@ -6,17 +6,19 @@ import platform
 import threading
 import urllib.request
 import re
+import math
 from pathlib import Path
 from typing import Any, Dict
 
-from PyQt6.QtCore import Qt, QObject, pyqtSignal, QSize, QPoint, QByteArray, QThread
+from PyQt6.QtCore import Qt, QObject, pyqtSignal, QSize, QPoint, QByteArray, QThread, QPointF, QRect
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFrame,
     QLabel, QPushButton, QLineEdit, QCheckBox, QProgressBar,
     QTextEdit, QTreeWidget, QTreeWidgetItem, QFileDialog, QDialog,
-    QGridLayout, QMessageBox, QApplication, QSplitter, QSizePolicy
+    QGridLayout, QMessageBox, QApplication, QSplitter, QSizePolicy,
+    QSlider, QStackedWidget
 )
-from PyQt6.QtGui import QIcon, QFont, QTextCursor, QPixmap, QBrush, QColor
+from PyQt6.QtGui import QIcon, QFont, QTextCursor, QPixmap, QBrush, QColor, QPainter, QPen, QImage
 
 from src.core.config import ProcessingConfig
 from src.core.processor import DicomProcessor
@@ -152,6 +154,7 @@ class CustomQuestionDialog(QDialog):
 
         lbl = QLabel(message, self)
         lbl.setWordWrap(True)
+        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl.setStyleSheet("font-size: 13px; color: #E5E7EB;")
         layout.addWidget(lbl)
 
@@ -203,6 +206,7 @@ class UpdateDialog(QDialog):
         message = parent.loc("update_message").format(new_version)
         lbl = QLabel(message, self)
         lbl.setWordWrap(True)
+        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl.setStyleSheet("font-size: 13px; color: #E5E7EB;")
         layout.addWidget(lbl)
 
@@ -275,6 +279,358 @@ class UpdateCheckerThread(QThread):
         return parse_version(latest) > parse_version(current)
 
 
+class DicomViewerWidget(QWidget):
+    """Виджет для отрисовки DICOM-изображения и линейки."""
+    slice_scrolled = pyqtSignal(int)  # -1 или 1 для прокрутки колесиком мыши
+
+    def __init__(self, parent: QWidget = None) -> None:
+        super().__init__(parent)
+        self.current_pixmap = None
+        self.current_dataset = None
+        self.image_rect = None
+
+        # Состояния линейки
+        self.start_pos = None
+        self.current_pos = None
+        self.drawing_line = False
+
+        self.setMouseTracking(True)
+        self.setStyleSheet("background-color: #000000;")
+
+    def set_dicom_image(self, pixmap: QPixmap, ds) -> None:
+        self.current_pixmap = pixmap
+        self.current_dataset = ds
+        self.update()
+
+    def clear_viewer(self) -> None:
+        self.current_pixmap = None
+        self.current_dataset = None
+        self.start_pos = None
+        self.current_pos = None
+        self.drawing_line = False
+        self.update()
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton and self.current_pixmap:
+            self.start_pos = event.position()
+            self.current_pos = event.position()
+            self.drawing_line = True
+            self.update()
+
+    def mouseMoveEvent(self, event) -> None:
+        if self.drawing_line:
+            self.current_pos = event.position()
+            self.update()
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton and self.drawing_line:
+            self.current_pos = event.position()
+            self.drawing_line = False
+            self.update()
+
+    def wheelEvent(self, event) -> None:
+        delta = event.angleDelta().y()
+        if delta > 0:
+            self.slice_scrolled.emit(-1)
+        elif delta < 0:
+            self.slice_scrolled.emit(1)
+
+    def to_image_coords(self, pt: QPointF) -> tuple[float, float]:
+        if not self.image_rect or not self.current_pixmap:
+            return 0.0, 0.0
+
+        x_w = pt.x()
+        y_w = pt.y()
+
+        offset_x = self.image_rect.x()
+        offset_y = self.image_rect.y()
+        view_w = self.image_rect.width()
+        view_h = self.image_rect.height()
+
+        pix_w = self.current_pixmap.width()
+        pix_h = self.current_pixmap.height()
+
+        x_img = (x_w - offset_x) * (pix_w / view_w)
+        y_img = (y_w - offset_y) * (pix_h / view_h)
+
+        x_img = max(0.0, min(float(pix_w), x_img))
+        y_img = max(0.0, min(float(pix_h), y_img))
+
+        return x_img, y_img
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor("#000000"))
+
+        if self.current_pixmap:
+            pix_w = self.current_pixmap.width()
+            pix_h = self.current_pixmap.height()
+            w = self.width()
+            h = self.height()
+
+            scale = min(w / pix_w, h / pix_h)
+            view_w = int(pix_w * scale)
+            view_h = int(pix_h * scale)
+
+            offset_x = (w - view_w) // 2
+            offset_y = (h - view_h) // 2
+
+            self.image_rect = QRect(offset_x, offset_y, view_w, view_h)
+            painter.drawPixmap(self.image_rect, self.current_pixmap)
+
+            # Отрисовка измерительной линейки
+            if self.start_pos and self.current_pos:
+                pen = QPen(QColor("#10B981"), 2, Qt.PenStyle.SolidLine)
+                painter.setPen(pen)
+                painter.drawLine(self.start_pos.toPoint(), self.current_pos.toPoint())
+
+                self.draw_tick(painter, self.start_pos, self.current_pos)
+                self.draw_tick(painter, self.current_pos, self.start_pos)
+
+                x1, y1 = self.to_image_coords(self.start_pos)
+                x2, y2 = self.to_image_coords(self.current_pos)
+
+                row_spacing = 1.0
+                col_spacing = 1.0
+                if self.current_dataset:
+                    pixel_spacing = getattr(self.current_dataset, "PixelSpacing", None)
+                    if pixel_spacing and len(pixel_spacing) == 2:
+                        row_spacing = float(pixel_spacing[0])
+                        col_spacing = float(pixel_spacing[1])
+                    else:
+                        imager_spacing = getattr(self.current_dataset, "ImagerPixelSpacing", None)
+                        if imager_spacing and len(imager_spacing) == 2:
+                            row_spacing = float(imager_spacing[0])
+                            col_spacing = float(imager_spacing[1])
+
+                dx = (x2 - x1) * col_spacing
+                dy = (y2 - y1) * row_spacing
+                dist_mm = math.sqrt(dx * dx + dy * dy)
+
+                text = f"{dist_mm:.1f} мм"
+                mid_x = (self.start_pos.x() + self.current_pos.x()) / 2
+                mid_y = (self.start_pos.y() + self.current_pos.y()) / 2
+
+                font = QFont("Consolas", 10, QFont.Weight.Bold)
+                painter.setFont(font)
+                metrics = painter.fontMetrics()
+                rect_text = metrics.boundingRect(text)
+                
+                rect_text.moveCenter(QPoint(int(mid_x), int(mid_y) - 15))
+                painter.fillRect(rect_text.adjusted(-4, -2, 4, 2), QColor(0, 0, 0, 180))
+                
+                painter.setPen(QColor("#FFFFFF"))
+                painter.drawText(rect_text, Qt.AlignmentFlag.AlignCenter, text)
+
+    def draw_tick(self, painter: QPainter, pt1: QPointF, pt2: QPointF) -> None:
+        dx = pt2.x() - pt1.x()
+        dy = pt2.y() - pt1.y()
+        length = math.sqrt(dx*dx + dy*dy)
+        if length < 1.0:
+            return
+        px = -dy / length
+        py = dx / length
+        
+        tick_len = 8
+        p1 = QPoint(int(pt1.x() + px * tick_len), int(pt1.y() + py * tick_len))
+        p2 = QPoint(int(pt1.x() - px * tick_len), int(pt1.y() - py * tick_len))
+        painter.drawLine(p1, p2)
+
+
+class DicomViewerPanel(QWidget):
+    """Панель управления просмотром DICOM серий."""
+    close_requested = pyqtSignal()
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.parent_app = parent
+        self.sorted_files = []
+        self.current_index = -1
+        self.is_loading = False
+
+        self.setup_ui()
+
+    def setup_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(15, 10, 15, 10)
+        layout.setSpacing(10)
+
+        top_layout = QHBoxLayout()
+        
+        self.lbl_info = QLabel(self)
+        self.lbl_info.setStyleSheet("font-size: 13px; font-weight: bold; color: #FFFFFF;")
+        top_layout.addWidget(self.lbl_info)
+
+        top_layout.addStretch()
+
+        self.btn_close = QPushButton(self.parent_app.loc("viewer_close"), self)
+        self.btn_close.clicked.connect(self.close_requested.emit)
+        self.btn_close.setStyleSheet("""
+            QPushButton {
+                background-color: #374151;
+                border: 1px solid #4B5563;
+                color: #FFFFFF;
+                padding: 5px 12px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #4B5563;
+            }
+        """)
+        top_layout.addWidget(self.btn_close)
+        layout.addLayout(top_layout)
+
+        main_layout = QHBoxLayout()
+        main_layout.setSpacing(15)
+
+        self.viewer = DicomViewerWidget(self)
+        self.viewer.slice_scrolled.connect(self.on_slice_scrolled)
+        main_layout.addWidget(self.viewer, stretch=1)
+
+        self.slider = QSlider(Qt.Orientation.Vertical, self)
+        self.slider.setInvertedAppearance(True)
+        self.slider.valueChanged.connect(self.on_slider_changed)
+        self.slider.setStyleSheet("""
+            QSlider::groove:vertical {
+                background: #1F2937;
+                width: 6px;
+                border-radius: 3px;
+            }
+            QSlider::handle:vertical {
+                background: #3B82F6;
+                height: 30px;
+                margin-left: -5px;
+                margin-right: -5px;
+                border-radius: 6px;
+            }
+            QSlider::handle:vertical:hover {
+                background: #60A5FA;
+            }
+        """)
+        main_layout.addWidget(self.slider)
+
+        layout.addLayout(main_layout)
+
+        self.lbl_status = QLabel(self)
+        self.lbl_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_status.setStyleSheet("font-size: 12px; color: #9CA3AF; font-weight: bold;")
+        layout.addWidget(self.lbl_status)
+
+    def load_series(self, files: list[str]) -> None:
+        import pydicom
+        self.is_loading = True
+        self.sorted_files = []
+        self.current_index = -1
+        self.viewer.clear_viewer()
+
+        slices = []
+        for f in files:
+            try:
+                ds = pydicom.dcmread(f, stop_before_pixels=True)
+                ipp = getattr(ds, "ImagePositionPatient", None)
+                z_coord = float(ipp[2]) if ipp and len(ipp) >= 3 else 0.0
+                instance_number = int(getattr(ds, "InstanceNumber", 0))
+                slices.append((f, z_coord, instance_number))
+            except Exception:
+                pass
+
+        if not slices:
+            self.lbl_info.setText("Ошибка загрузки серии.")
+            self.lbl_status.setText("")
+            self.is_loading = False
+            return
+
+        slices.sort(key=lambda x: (x[1], x[2]))
+        self.sorted_files = [x[0] for x in slices]
+
+        self.slider.setRange(0, len(self.sorted_files) - 1)
+        self.is_loading = False
+        
+        self.set_current_slice(0)
+
+    def set_current_slice(self, index: int) -> None:
+        if index < 0 or index >= len(self.sorted_files):
+            return
+
+        self.current_index = index
+        self.slider.setValue(index)
+
+        filepath = self.sorted_files[index]
+        import pydicom
+        try:
+            ds = pydicom.dcmread(filepath)
+            pat_name = getattr(ds, "PatientName", "Unknown")
+            pat_id = getattr(ds, "PatientID", "Unknown")
+            study_desc = getattr(ds, "StudyDescription", "")
+            series_desc = getattr(ds, "SeriesDescription", "")
+            
+            info_text = f"{pat_name} [{pat_id}] | {study_desc} | {series_desc}"
+            self.lbl_info.setText(info_text)
+            self.lbl_status.setText(self.parent_app.loc("viewer_slice", index + 1, len(self.sorted_files)))
+
+            pixmap = self.dicom_to_pixmap(ds)
+            if pixmap:
+                self.viewer.set_dicom_image(pixmap, ds)
+            else:
+                self.lbl_info.setText(self.parent_app.loc("viewer_no_pixels"))
+        except Exception as e:
+            self.lbl_info.setText(f"Ошибка чтения среза: {str(e)}")
+
+    def on_slider_changed(self, value: int) -> None:
+        if not self.is_loading and value != self.current_index:
+            self.set_current_slice(value)
+
+    def on_slice_scrolled(self, step: int) -> None:
+        new_index = self.current_index + step
+        if 0 <= new_index < len(self.sorted_files):
+            self.set_current_slice(new_index)
+
+    def dicom_to_pixmap(self, ds) -> QPixmap | None:
+        try:
+            import numpy as np
+            if not hasattr(ds, "pixel_array"):
+                return None
+
+            try:
+                ds.decompress()
+            except Exception:
+                pass
+
+            arr = ds.pixel_array.astype(float)
+            slope = float(getattr(ds, "RescaleSlope", 1.0))
+            intercept = float(getattr(ds, "RescaleIntercept", 0.0))
+            arr = arr * slope + intercept
+
+            window_center = 40.0
+            window_width = 400.0
+
+            wc = getattr(ds, "WindowCenter", None)
+            ww = getattr(ds, "WindowWidth", None)
+            if wc is not None and ww is not None:
+                try:
+                    c_val = wc[0] if hasattr(wc, "__iter__") else wc
+                    w_val = ww[0] if hasattr(ww, "__iter__") else ww
+                    window_center = float(c_val)
+                    window_width = float(w_val)
+                except Exception:
+                    pass
+
+            min_val = window_center - window_width / 2.0
+            max_val = window_center + window_width / 2.0
+
+            arr = np.clip(arr, min_val, max_val)
+            arr = ((arr - min_val) / (max_val - min_val) * 255.0).astype(np.uint8)
+
+            height, width = arr.shape
+            bytes_per_line = width
+
+            self._temp_arr = np.ascontiguousarray(arr)
+            qimg = QImage(self._temp_arr.data, width, height, bytes_per_line, QImage.Format.Format_Grayscale8)
+            return QPixmap.fromImage(qimg)
+        except Exception:
+            return None
+
+
 class PatientEditDialog(QDialog):
     """Диалог для интерактивной коррекции имени и ID пациента."""
 
@@ -294,6 +650,7 @@ class PatientEditDialog(QDialog):
 
         lbl_msg = QLabel(parent.loc("dialog_patient_message"), self)
         lbl_msg.setWordWrap(True)
+        lbl_msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl_msg.setStyleSheet("font-size: 12px; color: #E5E7EB;")
         layout.addWidget(lbl_msg)
 
@@ -358,6 +715,7 @@ class ScanProgressDialog(QDialog):
         layout.setContentsMargins(20, 20, 20, 20)
 
         self.lbl_status = QLabel(parent.loc("dialog_scan_finding"), self)
+        self.lbl_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_status.setStyleSheet("font-size: 13px; color: #E5E7EB;")
         layout.addWidget(self.lbl_status)
 
@@ -378,7 +736,7 @@ class ScanProgressDialog(QDialog):
             pct = int(prog * 100)
             self.progress_bar.setValue(pct)
             self.lbl_status.setText(
-                self.parent.loc("dialog_scan_progress", current, total, pct)
+                self.parent.loc("dialog_scan_progress", current, total)
             )
 
     def on_cancel(self) -> None:
@@ -440,6 +798,11 @@ class DicomSplitterApp(QMainWindow):
         self.stop_event = threading.Event()
         self._is_updating_tree = False
         self.scan_dialog = None
+
+        # Состояние вьюера
+        self.viewer_active = False
+        self.current_view_series_uid = None
+        self.current_view_seg_idx = None
 
         # Создание интерфейса
         self.create_widgets()
@@ -746,6 +1109,7 @@ class DicomSplitterApp(QMainWindow):
         self.tree_widget = QTreeWidget()
         self.tree_widget.setHeaderHidden(True)
         self.tree_widget.itemChanged.connect(self.on_item_changed)
+        self.tree_widget.itemClicked.connect(self.on_item_clicked)
         sidebar_layout.addWidget(self.tree_widget)
 
         # Метка статуса выбора
@@ -929,7 +1293,15 @@ class DicomSplitterApp(QMainWindow):
 
         content_layout.addWidget(control_frame)
 
-        self.splitter.addWidget(self.content_frame)
+        # Оборачиваем правую часть в QStackedWidget для переключения вьюера
+        self.right_stack = QStackedWidget()
+        self.right_stack.addWidget(self.content_frame) # Страница 0
+        
+        self.viewer_panel = DicomViewerPanel(self)
+        self.viewer_panel.close_requested.connect(self.close_viewer)
+        self.right_stack.addWidget(self.viewer_panel) # Страница 1
+        
+        self.splitter.addWidget(self.right_stack)
         main_layout.addWidget(self.splitter)
 
         # Настройки сплиттеров
@@ -1260,6 +1632,41 @@ class DicomSplitterApp(QMainWindow):
 
         self.tree_widget.expandAll()
         self._is_updating_tree = False
+
+    def on_item_clicked(self, item: QTreeWidgetItem, column: int) -> None:
+        """Обрабатывает клик на элемент дерева. Если кликнули на серию - открывает/закрывает вьюер."""
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if not data or not isinstance(data, tuple):
+            return
+            
+        if data[0] == "series":
+            s_uid = data[1]
+            seg_idx = data[2]
+            files = data[3]
+            
+            # Если вьюер уже открыт для этой же серии, закрываем его
+            if self.viewer_active and self.current_view_series_uid == s_uid and self.current_view_seg_idx == seg_idx:
+                self.close_viewer()
+            else:
+                self.open_viewer(s_uid, seg_idx, files)
+
+    def open_viewer(self, s_uid: str, seg_idx: int, files: list[str]) -> None:
+        """Переключает правую панель на вьюер и загружает серию."""
+        self.viewer_active = True
+        self.current_view_series_uid = s_uid
+        self.current_view_seg_idx = seg_idx
+        
+        self.viewer_panel.load_series(files)
+        self.right_stack.setCurrentIndex(1) # Переключаем на страницу вьюера
+
+    def close_viewer(self) -> None:
+        """Сворачивает вьюер и возвращает исходный интерфейс."""
+        self.viewer_active = False
+        self.current_view_series_uid = None
+        self.current_view_seg_idx = None
+        
+        self.right_stack.setCurrentIndex(0) # Переключаем на исходный интерфейс
+        self.tree_widget.clearSelection()   # Снимаем выделение в дереве
 
     def on_item_changed(self, item: QTreeWidgetItem, column: int) -> None:
         if self._is_updating_tree:

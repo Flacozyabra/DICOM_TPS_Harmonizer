@@ -87,7 +87,7 @@
     "dialog_pat_id": "ID пациента:",
     "dialog_scan_title": "Сканирование папки",
     "dialog_scan_finding": "Поиск файлов DICOM...",
-    "dialog_scan_progress": "Просканировано: {} / {} файлов ({}%)",
+    "dialog_scan_progress": "Просканировано: {} / {} файлов",
     "dialog_scan_cancel": "Отмена",
     "tooltip_create_input": "Создать папку Dicom_input в каталоге программы",
     "tooltip_create_output": "Создать папку Dicom_output в каталоге программы",
@@ -96,5 +96,8 @@
     "selected_status": "Выбрано файлов: {} / {} (Пациентов: {}, Исследований: {}, Серий: {})",
     "update_title": "Доступно обновление",
     "update_message": "Доступна новая версия {}. Хотите скачать её?",
-    "dont_show_again": "Не показывать больше"
+    "dont_show_again": "Не показывать больше",
+    "viewer_close": "Закрыть просмотр",
+    "viewer_slice": "Срез: {} / {}",
+    "viewer_no_pixels": "Нет пиксельных данных"
 }
