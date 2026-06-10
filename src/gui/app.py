@@ -307,6 +307,7 @@ class DicomViewerWidget(QWidget):
         self.start_pos = None
         self.current_pos = None
         self.drawing_line = False
+        self.ruler_close_rect = None
 
         # Состояние изменения окна
         self.windowing_active = False
@@ -333,6 +334,7 @@ class DicomViewerWidget(QWidget):
         self.start_pos = None
         self.current_pos = None
         self.drawing_line = False
+        self.ruler_close_rect = None
         self.windowing_active = False
         self.pan_active = False
         self.zoom_factor = 1.0
@@ -344,6 +346,17 @@ class DicomViewerWidget(QWidget):
             return
 
         btn = event.button()
+        pos = event.position()
+
+        # Проверяем клик по крестику закрытия линейки
+        if btn == Qt.MouseButton.LeftButton and self.ruler_active and self.ruler_close_rect and self.ruler_close_rect.contains(pos.toPoint()):
+            self.start_pos = None
+            self.current_pos = None
+            self.drawing_line = False
+            self.ruler_close_rect = None
+            self.update()
+            return
+
         if btn in (Qt.MouseButton.MiddleButton, Qt.MouseButton.RightButton):
             # Панорамирование (Pan) при зажатии средней или правой кнопки мыши
             self.pan_active = True
@@ -483,20 +496,65 @@ class DicomViewerWidget(QWidget):
                 dy = (y2 - y1) * row_spacing
                 dist_mm = math.sqrt(dx * dx + dy * dy)
 
-                text = f"{dist_mm:.1f} мм"
+                text_dist = f"{dist_mm:.1f} мм"
                 mid_x = (self.start_pos.x() + self.current_pos.x()) / 2
                 mid_y = (self.start_pos.y() + self.current_pos.y()) / 2
 
                 font = QFont("Consolas", 10, QFont.Weight.Bold)
                 painter.setFont(font)
                 metrics = painter.fontMetrics()
-                rect_text = metrics.boundingRect(text)
-                
-                rect_text.moveCenter(QPoint(int(mid_x), int(mid_y) - 15))
-                painter.fillRect(rect_text.adjusted(-4, -2, 4, 2), QColor(0, 0, 0, 180))
-                
+                rect_dist = metrics.boundingRect(text_dist)
+
+                padding_x = 4
+                padding_y = 2
+                cross_width = 12
+                space = 6
+
+                total_w = rect_dist.width() + cross_width + space
+                total_h = max(rect_dist.height(), cross_width)
+
+                rect_plate = QRect(
+                    int(mid_x - total_w / 2 - padding_x),
+                    int(mid_y - 15 - total_h / 2 - padding_y),
+                    int(total_w + padding_x * 2),
+                    int(total_h + padding_y * 2)
+                )
+
+                # Рисуем подложку
+                painter.fillRect(rect_plate, QColor(0, 0, 0, 180))
+
+                # Рисуем текст
                 painter.setPen(QColor("#FFFFFF"))
-                painter.drawText(rect_text, Qt.AlignmentFlag.AlignCenter, text)
+                text_rect = QRect(
+                    rect_plate.x() + padding_x,
+                    rect_plate.y() + padding_y,
+                    rect_dist.width(),
+                    total_h
+                )
+                painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, text_dist)
+
+                # Рисуем крестик [X]
+                cross_rect = QRect(
+                    text_rect.x() + text_rect.width() + space,
+                    rect_plate.y() + (rect_plate.height() - cross_width) // 2,
+                    cross_width,
+                    cross_width
+                )
+                self.ruler_close_rect = cross_rect
+
+                pen_cross = QPen(QColor("#EF4444"), 2, Qt.PenStyle.SolidLine)
+                painter.setPen(pen_cross)
+                margin = 2
+                painter.drawLine(
+                    cross_rect.x() + margin, cross_rect.y() + margin,
+                    cross_rect.x() + cross_rect.width() - margin, cross_rect.y() + cross_rect.height() - margin
+                )
+                painter.drawLine(
+                    cross_rect.x() + cross_rect.width() - margin, cross_rect.y() + margin,
+                    cross_rect.x() + margin, cross_rect.y() + cross_rect.height() - margin
+                )
+            else:
+                self.ruler_close_rect = None
 
             # Вывод параметров окна HU и Zoom в левый нижний угол
             painter.setFont(QFont("Consolas", 10, QFont.Weight.Bold))
