@@ -54,6 +54,8 @@ def set_dark_titlebar(window: QWidget) -> None:
             pass
 
 
+
+
 # Сигнальный мост для безопасной передачи сообщений из фоновых потоков в GUI
 class QtSignalBridge(QObject):
     log_signal = pyqtSignal(str, str)          # text, tag
@@ -1957,7 +1959,7 @@ class DicomSplitterApp(QMainWindow):
         self.current_theme = theme_name
         self.apply_styles()
         self.save_last_paths()
-        self.set_dark_titlebar()
+        set_dark_titlebar(self)
 
     def load_last_paths(self) -> tuple[str, str, str, str]:
         config_file = self.get_config_path()
@@ -2160,26 +2162,9 @@ class DicomSplitterApp(QMainWindow):
         else:
             self.start_btn.setText(self.loc("run_optimization"))
 
-    def set_dark_titlebar(self) -> None:
-        """Окрашивает верхнюю полосу заголовка окна в темный цвет на Windows."""
-        if platform.system() == "Windows":
-            try:
-                import ctypes
-                hwnd = int(self.winId())
-                is_dark = 0 if self.current_theme == "light" else 1
-                for attr in [20, 19]:
-                    ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                        hwnd,
-                        attr,
-                        ctypes.byref(ctypes.c_int(is_dark)),
-                        ctypes.sizeof(ctypes.c_int)
-                    )
-            except Exception:
-                pass
-
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        self.set_dark_titlebar()
+        set_dark_titlebar(self)
 
     def closeEvent(self, event) -> None:
         self.save_last_paths()
