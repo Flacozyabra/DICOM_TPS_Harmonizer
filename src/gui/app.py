@@ -1964,6 +1964,8 @@ class DicomSplitterApp(QMainWindow):
         arrow_right = (self.project_root / "themes" / "arrow_right.png").as_posix()
         arrow_down = (self.project_root / "themes" / "arrow_down.png").as_posix()
         chk_checked = (self.project_root / "themes" / "checkbox_checked.png").as_posix()
+        splitter_dots_v = (self.project_root / "themes" / "splitter_dots_v.png").as_posix()
+        splitter_dots_h = (self.project_root / "themes" / "splitter_dots_h.png").as_posix()
 
         qss = """
             QMainWindow {
@@ -2180,10 +2182,12 @@ class DicomSplitterApp(QMainWindow):
                 background-color: #2D2D2D;
             }
             QSplitter::handle:horizontal {
-                width: 4px;
+                width: 3px;
+                image: url(PATH_SPLITTER_DOTS_V);
             }
             QSplitter::handle:vertical {
-                height: 4px;
+                height: 3px;
+                image: url(PATH_SPLITTER_DOTS_H);
             }
             QSplitter::handle:hover {
                 background-color: #3B82F6;
@@ -2197,7 +2201,9 @@ class DicomSplitterApp(QMainWindow):
             }
         """.replace("PATH_ARROW_RIGHT", arrow_right)\
            .replace("PATH_ARROW_DOWN", arrow_down)\
-           .replace("PATH_CHECKBOX_CHECKED", chk_checked)
+           .replace("PATH_CHECKBOX_CHECKED", chk_checked)\
+           .replace("PATH_SPLITTER_DOTS_V", splitter_dots_v)\
+           .replace("PATH_SPLITTER_DOTS_H", splitter_dots_h)
 
         QApplication.instance().setStyleSheet(qss)
 
