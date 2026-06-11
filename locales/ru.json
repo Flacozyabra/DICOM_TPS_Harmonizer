@@ -106,6 +106,7 @@
     "preset_bone": "Кости",
     "preset_lung": "Легкие",
     "preset_brain": "Мозг",
+    "tooltip_osd": "Показать/скрыть надписи",
     "tooltip_ruler": "Включить/выключить линейку",
     "tooltip_hu": "Настройка окна HU (контрастность)",
     "hu_panel_title": "Параметры HU",

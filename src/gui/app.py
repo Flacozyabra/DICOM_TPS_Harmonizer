@@ -319,8 +319,14 @@ class DicomViewerWidget(QWidget):
         # Состояние панорамирования (Pan)
         self.pan_active = False
 
+        self.osd_visible = True
+
         self.setMouseTracking(True)
         self.setStyleSheet("background-color: #000000;")
+
+    def set_osd_visible(self, visible: bool) -> None:
+        self.osd_visible = visible
+        self.update()
 
     def set_dicom_image(self, pixmap: QPixmap, ds) -> None:
         self.current_pixmap = pixmap
@@ -568,110 +574,111 @@ class DicomViewerWidget(QWidget):
                 self.ruler_close_rect = None
 
             # Отрисовка метаданных пациента/серии в левом верхнем углу (OSD)
-            if self.current_dataset:
-                painter.setFont(QFont("Consolas", 10, QFont.Weight.Bold))
-                
-                pat_name = str(getattr(self.current_dataset, "PatientName", "Unknown"))
-                pat_id = str(getattr(self.current_dataset, "PatientID", "Unknown"))
-                
-                # Форматируем дату рождения
-                dob_raw = getattr(self.current_dataset, "PatientBirthDate", "")
-                dob = ""
-                if dob_raw and len(dob_raw) == 8:
-                    dob = f"{dob_raw[6:8]}-{dob_raw[4:6]}-{dob_raw[0:4]}"
-                else:
-                    dob = dob_raw
-                sex = getattr(self.current_dataset, "PatientSex", "")
-                pat_info = f"{dob} {sex}".strip()
-                
-                study_desc = getattr(self.current_dataset, "StudyDescription", "")
-                series_desc = getattr(self.current_dataset, "SeriesDescription", "")
-                
-                top_lines = [pat_name, pat_id, pat_info, study_desc, series_desc]
-                top_lines = [line for line in top_lines if line] # убираем пустые
-                
-                y_offset = 15
-                for line in top_lines:
-                    metrics = painter.fontMetrics()
-                    rect_line = metrics.boundingRect(line)
-                    rect_line.moveTopLeft(QPoint(15, y_offset))
-                    painter.fillRect(rect_line.adjusted(-4, -2, 4, 2), QColor(0, 0, 0, 150))
-                    painter.setPen(QColor("#E5E7EB"))
-                    painter.drawText(rect_line, Qt.AlignmentFlag.AlignLeft, line)
-                    y_offset += rect_line.height() + 5
-
-            # Вывод параметров окна HU, Zoom, Modality и Transfer Syntax в левый нижний угол
-            painter.setFont(QFont("Consolas", 10, QFont.Weight.Bold))
-            
-            lines_bottom = []
-            lines_bottom.append(f"WL: {int(self.window_center)} WW: {int(self.window_width)} | Zoom: {int(self.zoom_factor * 100)}%")
-            
-            if self.current_dataset:
-                modality = getattr(self.current_dataset, "Modality", "")
-                if modality:
-                    lines_bottom.append(f"Modality: {modality}")
-                
-                try:
-                    ts_uid = getattr(self.current_dataset, "original_transfer_syntax", None)
-                    if not ts_uid:
-                        ts_uid = self.current_dataset.file_meta.TransferSyntaxUID
-                    ts_name = ts_uid.name
-                    if " (" in ts_name:
-                        ts_name = ts_name.split(" (")[0]
-                    lines_bottom.append(f"TS: {ts_name}")
-                except Exception:
-                    pass
-
-            metrics_b = painter.fontMetrics()
-            y_offset_b = self.height() - 15
-            for line in reversed(lines_bottom):
-                rect_info = metrics_b.boundingRect(line)
-                rect_info.moveBottomLeft(QPoint(15, y_offset_b))
-                painter.fillRect(rect_info.adjusted(-4, -2, 4, 2), QColor(0, 0, 0, 150))
-                painter.setPen(QColor("#E5E7EB"))
-                painter.drawText(rect_info, Qt.AlignmentFlag.AlignLeft, line)
-                y_offset_b -= rect_info.height() + 5
-
-            # Отрисовка номера среза в правом нижнем углу
-            if self.total_slices > 0:
-                painter.setFont(QFont("Consolas", 10, QFont.Weight.Bold))
-                slice_info = ""
-                if hasattr(self, "parent") and hasattr(self.parent(), "parent_app"):
-                    slice_info = self.parent().parent_app.loc("viewer_slice", self.current_slice, self.total_slices)
-                else:
-                    slice_info = f"Slice: {self.current_slice} / {self.total_slices}"
-                
-                spacing_text = ""
+            if self.osd_visible:
                 if self.current_dataset:
-                    spacing = getattr(self.current_dataset, "SpacingBetweenSlices", None)
-                    if spacing is None:
-                        spacing = getattr(self.current_dataset, "SliceThickness", None)
-                    if spacing is not None:
-                        try:
-                            spacing_val = float(spacing)
-                            if hasattr(self, "parent") and hasattr(self.parent(), "parent_app"):
-                                spacing_text = self.parent().parent_app.loc("viewer_spacing", spacing_val)
-                            else:
-                                spacing_text = f"Spacing: {spacing_val:.1f} mm"
-                        except (ValueError, TypeError):
-                            pass
+                    painter.setFont(QFont("Consolas", 10, QFont.Weight.Bold))
+                    
+                    pat_name = str(getattr(self.current_dataset, "PatientName", "Unknown"))
+                    pat_id = str(getattr(self.current_dataset, "PatientID", "Unknown"))
+                    
+                    # Форматируем дату рождения
+                    dob_raw = getattr(self.current_dataset, "PatientBirthDate", "")
+                    dob = ""
+                    if dob_raw and len(dob_raw) == 8:
+                        dob = f"{dob_raw[6:8]}-{dob_raw[4:6]}-{dob_raw[0:4]}"
+                    else:
+                        dob = dob_raw
+                    sex = getattr(self.current_dataset, "PatientSex", "")
+                    pat_info = f"{dob} {sex}".strip()
+                    
+                    study_desc = getattr(self.current_dataset, "StudyDescription", "")
+                    series_desc = getattr(self.current_dataset, "SeriesDescription", "")
+                    
+                    top_lines = [pat_name, pat_id, pat_info, study_desc, series_desc]
+                    top_lines = [line for line in top_lines if line] # убираем пустые
+                    
+                    y_offset = 15
+                    for line in top_lines:
+                        metrics = painter.fontMetrics()
+                        rect_line = metrics.boundingRect(line)
+                        rect_line.moveTopLeft(QPoint(15, y_offset))
+                        painter.fillRect(rect_line.adjusted(-4, -2, 4, 2), QColor(0, 0, 0, 150))
+                        painter.setPen(QColor("#E5E7EB"))
+                        painter.drawText(rect_line, Qt.AlignmentFlag.AlignLeft, line)
+                        y_offset += rect_line.height() + 5
 
-                metrics_r = painter.fontMetrics()
+                # Вывод параметров окна HU, Zoom, Modality и Transfer Syntax в левый нижний угол
+                painter.setFont(QFont("Consolas", 10, QFont.Weight.Bold))
                 
-                # Рисуем номер среза
-                rect_slice = metrics_r.boundingRect(slice_info)
-                rect_slice.moveBottomRight(QPoint(self.width() - 15, self.height() - 15))
-                painter.fillRect(rect_slice.adjusted(-4, -2, 4, 2), QColor(0, 0, 0, 150))
-                painter.setPen(QColor("#E5E7EB"))
-                painter.drawText(rect_slice, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, slice_info)
+                lines_bottom = []
+                lines_bottom.append(f"WL: {int(self.window_center)} WW: {int(self.window_width)} | Zoom: {int(self.zoom_factor * 100)}%")
                 
-                # Рисуем шаг среза над номером среза
-                if spacing_text:
-                    rect_spacing = metrics_r.boundingRect(spacing_text)
-                    rect_spacing.moveBottomRight(QPoint(self.width() - 15, rect_slice.top() - 8))
-                    painter.fillRect(rect_spacing.adjusted(-4, -2, 4, 2), QColor(0, 0, 0, 150))
+                if self.current_dataset:
+                    modality = getattr(self.current_dataset, "Modality", "")
+                    if modality:
+                        lines_bottom.append(f"Modality: {modality}")
+                    
+                    try:
+                        ts_uid = getattr(self.current_dataset, "original_transfer_syntax", None)
+                        if not ts_uid:
+                            ts_uid = self.current_dataset.file_meta.TransferSyntaxUID
+                        ts_name = ts_uid.name
+                        if " (" in ts_name:
+                            ts_name = ts_name.split(" (")[0]
+                        lines_bottom.append(f"TS: {ts_name}")
+                    except Exception:
+                        pass
+
+                metrics_b = painter.fontMetrics()
+                y_offset_b = self.height() - 15
+                for line in reversed(lines_bottom):
+                    rect_info = metrics_b.boundingRect(line)
+                    rect_info.moveBottomLeft(QPoint(15, y_offset_b))
+                    painter.fillRect(rect_info.adjusted(-4, -2, 4, 2), QColor(0, 0, 0, 150))
                     painter.setPen(QColor("#E5E7EB"))
-                    painter.drawText(rect_spacing, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, spacing_text)
+                    painter.drawText(rect_info, Qt.AlignmentFlag.AlignLeft, line)
+                    y_offset_b -= rect_info.height() + 5
+
+                # Отрисовка номера среза в правом нижнем углу
+                if self.total_slices > 0:
+                    painter.setFont(QFont("Consolas", 10, QFont.Weight.Bold))
+                    slice_info = ""
+                    if hasattr(self, "parent") and hasattr(self.parent(), "parent_app"):
+                        slice_info = self.parent().parent_app.loc("viewer_slice", self.current_slice, self.total_slices)
+                    else:
+                        slice_info = f"Slice: {self.current_slice} / {self.total_slices}"
+                    
+                    spacing_text = ""
+                    if self.current_dataset:
+                        spacing = getattr(self.current_dataset, "SpacingBetweenSlices", None)
+                        if spacing is None:
+                            spacing = getattr(self.current_dataset, "SliceThickness", None)
+                        if spacing is not None:
+                            try:
+                                spacing_val = float(spacing)
+                                if hasattr(self, "parent") and hasattr(self.parent(), "parent_app"):
+                                    spacing_text = self.parent().parent_app.loc("viewer_spacing", spacing_val)
+                                else:
+                                    spacing_text = f"Spacing: {spacing_val:.1f} mm"
+                            except (ValueError, TypeError):
+                                pass
+
+                    metrics_r = painter.fontMetrics()
+                    
+                    # Рисуем номер среза
+                    rect_slice = metrics_r.boundingRect(slice_info)
+                    rect_slice.moveBottomRight(QPoint(self.width() - 15, self.height() - 15))
+                    painter.fillRect(rect_slice.adjusted(-4, -2, 4, 2), QColor(0, 0, 0, 150))
+                    painter.setPen(QColor("#E5E7EB"))
+                    painter.drawText(rect_slice, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, slice_info)
+                    
+                    # Рисуем шаг среза над номером среза
+                    if spacing_text:
+                        rect_spacing = metrics_r.boundingRect(spacing_text)
+                        rect_spacing.moveBottomRight(QPoint(self.width() - 15, rect_slice.top() - 8))
+                        painter.fillRect(rect_spacing.adjusted(-4, -2, 4, 2), QColor(0, 0, 0, 150))
+                        painter.setPen(QColor("#E5E7EB"))
+                        painter.drawText(rect_spacing, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, spacing_text)
 
     def draw_tick(self, painter: QPainter, pt1: QPointF, pt2: QPointF) -> None:
         dx = pt2.x() - pt1.x()
@@ -732,8 +739,10 @@ class DicomViewerPanel(QWidget):
                 border: 1px solid #374151;
                 border-radius: 4px;
                 color: #FFFFFF;
-                padding: 4px 8px;
+                padding: 0px 8px;
                 font-size: 12px;
+                min-height: 28px;
+                max-height: 28px;
             }
             QComboBox QAbstractItemView {
                 background-color: #1A1A1A;
@@ -744,9 +753,11 @@ class DicomViewerPanel(QWidget):
         """)
         top_layout.addWidget(self.cb_presets)
 
-        # Создаем программные иконки
-        self.img_ruler = self.create_ruler_icon()
-        self.img_hu = self.create_hu_icon()
+        # Загружаем монохромные PNG иконки
+        resources_dir = self.parent_app.project_root / "themes"
+        self.img_ruler = QIcon(str(resources_dir / "ruler.png"))
+        self.img_hu = QIcon(str(resources_dir / "hu.png"))
+        self.img_osd = QIcon(str(resources_dir / "eye.png"))
 
         # Кнопка линейки
         self.btn_ruler = QPushButton(self)
@@ -764,6 +775,14 @@ class DicomViewerPanel(QWidget):
         self.btn_hu.clicked.connect(self.toggle_hu)
         top_layout.addWidget(self.btn_hu)
 
+        # Кнопка скрытия надписей OSD
+        self.btn_osd = QPushButton(self)
+        self.btn_osd.setIcon(self.img_osd)
+        self.btn_osd.setIconSize(QSize(20, 20))
+        self.btn_osd.setToolTip(self.parent_app.loc("tooltip_osd") if hasattr(self.parent_app, "loc") else "Показать/скрыть надписи")
+        self.btn_osd.clicked.connect(self.toggle_osd)
+        top_layout.addWidget(self.btn_osd)
+
         # Кнопка закрытия
         self.btn_close = QPushButton(self.parent_app.loc("viewer_close"), self)
         self.btn_close.clicked.connect(self.close_requested.emit)
@@ -772,8 +791,10 @@ class DicomViewerPanel(QWidget):
                 background-color: #374151;
                 border: 1px solid #4B5563;
                 color: #FFFFFF;
-                padding: 5px 12px;
+                padding: 0px 12px;
                 border-radius: 4px;
+                min-height: 28px;
+                max-height: 28px;
             }
             QPushButton:hover {
                 background-color: #4B5563;
@@ -913,49 +934,12 @@ class DicomViewerPanel(QWidget):
 
         self.btn_ruler.setToolTip(self.parent_app.loc("tooltip_ruler") if hasattr(self.parent_app, "loc") else "Линейка")
         self.btn_hu.setToolTip(self.parent_app.loc("tooltip_hu") if hasattr(self.parent_app, "loc") else "Настройка окна HU")
+        self.btn_osd.setToolTip(self.parent_app.loc("tooltip_osd") if hasattr(self.parent_app, "loc") else "Показать/скрыть надписи")
 
         if hasattr(self, "hu_panel"):
             self.lbl_hu_title.setText(self.parent_app.loc("hu_panel_title") if hasattr(self.parent_app, "loc") else "Параметры HU")
             self.lbl_wc_val.setText(self.parent_app.loc("hu_level", int(self.slider_wc.value())) if hasattr(self.parent_app, "loc") else f"Level: {int(self.slider_wc.value())}")
             self.lbl_ww_val.setText(self.parent_app.loc("hu_width", int(self.slider_ww.value())) if hasattr(self.parent_app, "loc") else f"Width: {int(self.slider_ww.value())}")
-
-    def create_ruler_icon(self) -> QIcon:
-        pixmap = QPixmap(24, 24)
-        pixmap.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        pen = QPen(QColor("#FFFFFF"), 2)
-        painter.setPen(pen)
-        painter.drawLine(3, 21, 21, 3)
-        
-        painter.drawLine(1, 19, 5, 23)
-        painter.drawLine(19, 1, 23, 5)
-        
-        pen_ticks = QPen(QColor("#3B82F6"), 1.5)
-        painter.setPen(pen_ticks)
-        painter.drawLine(6, 18, 9, 21)
-        painter.drawLine(12, 12, 15, 15)
-        painter.drawLine(18, 6, 21, 9)
-        
-        painter.end()
-        return QIcon(pixmap)
-
-    def create_hu_icon(self) -> QIcon:
-        pixmap = QPixmap(24, 24)
-        pixmap.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        painter.setPen(QPen(QColor("#FFFFFF"), 2))
-        painter.setBrush(QBrush(QColor("#FFFFFF")))
-        painter.drawChord(2, 2, 20, 20, -90 * 16, 180 * 16)
-        
-        painter.setBrush(QBrush(Qt.GlobalColor.transparent))
-        painter.drawChord(2, 2, 20, 20, 90 * 16, 180 * 16)
-        
-        painter.end()
-        return QIcon(pixmap)
 
     def update_buttons_style(self) -> None:
         style_ruler_active = """
@@ -963,7 +947,7 @@ class DicomViewerPanel(QWidget):
                 background-color: #3B82F6;
                 border: 1px solid #60A5FA;
                 border-radius: 4px;
-                min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px;
+                min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px;
             }
         """
         style_ruler_inactive = """
@@ -971,7 +955,7 @@ class DicomViewerPanel(QWidget):
                 background-color: #374151;
                 border: 1px solid #4B5563;
                 border-radius: 4px;
-                min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px;
+                min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px;
             }
             QPushButton:hover { background-color: #4B5563; }
         """
@@ -980,7 +964,7 @@ class DicomViewerPanel(QWidget):
                 background-color: #10B981;
                 border: 1px solid #34D399;
                 border-radius: 4px;
-                min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px;
+                min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px;
             }
         """
         style_hu_inactive = """
@@ -988,13 +972,35 @@ class DicomViewerPanel(QWidget):
                 background-color: #374151;
                 border: 1px solid #4B5563;
                 border-radius: 4px;
-                min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px;
+                min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px;
+            }
+            QPushButton:hover { background-color: #4B5563; }
+        """
+        style_osd_active = """
+            QPushButton {
+                background-color: #3B82F6;
+                border: 1px solid #60A5FA;
+                border-radius: 4px;
+                min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px;
+            }
+        """
+        style_osd_inactive = """
+            QPushButton {
+                background-color: #374151;
+                border: 1px solid #4B5563;
+                border-radius: 4px;
+                min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px;
             }
             QPushButton:hover { background-color: #4B5563; }
         """
 
         self.btn_ruler.setStyleSheet(style_ruler_active if self.viewer.ruler_active else style_ruler_inactive)
         self.btn_hu.setStyleSheet(style_hu_active if self.viewer.hu_active else style_hu_inactive)
+        self.btn_osd.setStyleSheet(style_osd_active if self.viewer.osd_visible else style_osd_inactive)
+
+    def toggle_osd(self) -> None:
+        self.viewer.set_osd_visible(not self.viewer.osd_visible)
+        self.update_buttons_style()
 
     def toggle_ruler(self) -> None:
         active = not self.viewer.ruler_active

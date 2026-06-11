@@ -106,6 +106,7 @@
     "preset_bone": "Bone",
     "preset_lung": "Lung",
     "preset_brain": "Brain",
+    "tooltip_osd": "Show/hide overlay text",
     "tooltip_ruler": "Toggle ruler",
     "tooltip_hu": "Adjust HU window (contrast)",
     "hu_panel_title": "HU Parameters",
