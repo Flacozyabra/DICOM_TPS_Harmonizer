@@ -25,22 +25,25 @@ from src.core.processor import DicomProcessor
 from src.utils.logger import BaseLogger
 
 def set_dark_titlebar(window: QWidget) -> None:
-    """Окрашивает верхнюю полосу заголовка окна в темный или светлый цвет на Windows в зависимости от темы."""
+    """Окрашивает верхнюю полосу заголовка окна на Windows. Всплывающие окна всегда темные."""
     if platform.system() == "Windows":
         try:
             import ctypes
             hwnd = int(window.winId())
             
-            # Находим тему, обходя родителей
-            theme = "dark"
-            p = window
-            while p:
-                if hasattr(p, "current_theme"):
-                    theme = p.current_theme
-                    break
-                p = p.parent()
-                
-            is_dark = 0 if theme == "light" else 1
+            # Всплывающие диалоги (QDialog) ВСЕГДА должны иметь темный заголовок
+            if isinstance(window, QDialog):
+                is_dark = 1
+            else:
+                # Находим тему, обходя родителей
+                theme = "dark"
+                p = window
+                while p:
+                    if hasattr(p, "current_theme"):
+                        theme = p.current_theme
+                        break
+                    p = p.parent()
+                is_dark = 0 if theme == "light" else 1
             
             # Атрибут DWMWA_USE_IMMERSIVE_DARK_MODE (20 в Win11, 19 в Win10)
             for attr in [20, 19]:
@@ -52,6 +55,7 @@ def set_dark_titlebar(window: QWidget) -> None:
                 )
         except Exception:
             pass
+
 
 
 
@@ -1835,7 +1839,6 @@ class DicomSplitterApp(QMainWindow):
         self.current_lang = saved_lang
         self.current_theme = saved_theme
         
-        self.generate_arrow_right_dark()
         
         self.translations: dict[str, str] = {}
         self.load_locale(self.current_lang)
@@ -1927,27 +1930,48 @@ class DicomSplitterApp(QMainWindow):
         config_dir.mkdir(parents=True, exist_ok=True)
         return config_dir / "config.json"
 
-    def generate_arrow_right_dark(self) -> None:
-        path = self.project_root / "themes" / "arrow_right_dark.png"
-        if not path.exists():
-            try:
-                from PyQt6.QtGui import QPixmap, QPainter, QPen, QColor
-                from PyQt6.QtCore import Qt, QPointF
-                pixmap = QPixmap(16, 16)
-                pixmap.fill(Qt.GlobalColor.transparent)
-                painter = QPainter(pixmap)
-                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-                pen = QPen(QColor("#1F2937"))
-                pen.setWidthF(2.5)
-                pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-                pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-                painter.setPen(pen)
-                points = [QPointF(5.5, 3.5), QPointF(10.5, 8.0), QPointF(5.5, 12.5)]
-                painter.drawPolyline(points)
-                painter.end()
-                pixmap.save(str(path), "PNG")
-            except Exception:
-                pass
+    def generate_theme_arrows(self, color_right_hex: str, color_down_hex: str) -> tuple[str, str]:
+        themes_dir = self.project_root / "themes"
+        themes_dir.mkdir(exist_ok=True)
+        path_right = themes_dir / "arrow_right_theme.png"
+        path_down = themes_dir / "arrow_down_theme.png"
+        try:
+            from PyQt6.QtGui import QPixmap, QPainter, QPen, QColor
+            from PyQt6.QtCore import Qt, QPointF
+            
+            # Стрелка вправо
+            pixmap_right = QPixmap(16, 16)
+            pixmap_right.fill(Qt.GlobalColor.transparent)
+            painter_r = QPainter(pixmap_right)
+            painter_r.setRenderHint(QPainter.RenderHint.Antialiasing)
+            pen_r = QPen(QColor(color_right_hex))
+            pen_r.setWidthF(2.5)
+            pen_r.setCapStyle(Qt.PenCapStyle.RoundCap)
+            pen_r.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            painter_r.setPen(pen_r)
+            points_r = [QPointF(5.5, 3.5), QPointF(10.5, 8.0), QPointF(5.5, 12.5)]
+            painter_r.drawPolyline(points_r)
+            painter_r.end()
+            pixmap_right.save(str(path_right), "PNG")
+            
+            # Стрелка вниз
+            pixmap_down = QPixmap(16, 16)
+            pixmap_down.fill(Qt.GlobalColor.transparent)
+            painter_d = QPainter(pixmap_down)
+            painter_d.setRenderHint(QPainter.RenderHint.Antialiasing)
+            pen_d = QPen(QColor(color_down_hex))
+            pen_d.setWidthF(2.5)
+            pen_d.setCapStyle(Qt.PenCapStyle.RoundCap)
+            pen_d.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            painter_d.setPen(pen_d)
+            points_d = [QPointF(3.5, 5.5), QPointF(8.0, 10.5), QPointF(12.5, 5.5)]
+            painter_d.drawPolyline(points_d)
+            painter_d.end()
+            pixmap_down.save(str(path_down), "PNG")
+        except Exception:
+            pass
+        return path_right.as_posix(), path_down.as_posix()
+
 
     def on_theme_changed(self, index: int) -> None:
         theme_name = self.theme_combo.itemData(index)
@@ -2436,13 +2460,7 @@ class DicomSplitterApp(QMainWindow):
             
         palette = self.THEMES[self.current_theme]
         
-        if self.current_theme == "light":
-            self.generate_arrow_right_dark()
-            arrow_right = (self.project_root / "themes" / "arrow_right_dark.png").as_posix()
-        else:
-            arrow_right = (self.project_root / "themes" / "arrow_right.png").as_posix()
-            
-        arrow_down = (self.project_root / "themes" / "arrow_down.png").as_posix()
+        arrow_right, arrow_down = self.generate_theme_arrows(palette['TEXT_LIGHT'], palette['ACCENT_COLOR'])
         chk_checked = (self.project_root / "themes" / "checkbox_checked.png").as_posix()
         splitter_dots_v = (self.project_root / "themes" / "splitter_dots_v.png").as_posix()
         splitter_dots_h = (self.project_root / "themes" / "splitter_dots_h.png").as_posix()

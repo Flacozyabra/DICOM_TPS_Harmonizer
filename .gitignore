@@ -19,3 +19,6 @@ problem_case/
 
 # Gemini workspace files
 .gemini/
+
+# Dynamically generated assets
+themes/*_theme.png
