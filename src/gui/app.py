@@ -10,7 +10,7 @@ import math
 from pathlib import Path
 from typing import Any, Dict
 
-from PyQt6.QtCore import Qt, QObject, pyqtSignal, QSize, QPoint, QByteArray, QThread, QPointF, QRect
+from PyQt6.QtCore import Qt, QObject, pyqtSignal, QSize, QPoint, QByteArray, QThread, QPointF, QRect, QEvent
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFrame,
     QLabel, QPushButton, QLineEdit, QCheckBox, QProgressBar,
@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
     QGridLayout, QMessageBox, QApplication, QSplitter, QSizePolicy,
     QSlider, QStackedWidget, QComboBox
 )
-from PyQt6.QtGui import QIcon, QFont, QTextCursor, QPixmap, QBrush, QColor, QPainter, QPen, QImage, QLinearGradient, QPolygon, QDragEnterEvent, QDropEvent
+from PyQt6.QtGui import QIcon, QFont, QTextCursor, QPixmap, QBrush, QColor, QPainter, QPen, QImage, QLinearGradient, QPolygon, QDragEnterEvent, QDropEvent, QDragMoveEvent
 
 from src.core.config import ProcessingConfig
 from src.core.processor import DicomProcessor
@@ -1866,6 +1866,7 @@ class DicomSplitterApp(QMainWindow):
 
         # Создание интерфейса
         self.create_widgets()
+        self.install_drag_drop_filters(self)
         self.apply_styles()
         self.update_locale_texts()
         self.center_on_screen()
@@ -2750,19 +2751,32 @@ class DicomSplitterApp(QMainWindow):
         if hasattr(self, "viewer_panel"):
             self.viewer_panel.apply_theme()
 
-    # Drag and Drop поддержка перетаскивания папок
-    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
+    # Drag and Drop поддержка перетаскивания папок (включая сетевые) в любую часть окна
+    def install_drag_drop_filters(self, widget: QWidget) -> None:
+        widget.installEventFilter(self)
+        for child in widget.findChildren(QWidget):
+            child.installEventFilter(self)
 
-    def dropEvent(self, event: QDropEvent) -> None:
-        urls = event.mimeData().urls()
-        if urls:
-            local_path = Path(urls[0].toLocalFile())
-            if local_path.is_dir():
-                self.input_entry.setText(str(local_path.resolve()))
-                self.save_last_paths()
-                self.run_input_scan()
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if event.type() in (QEvent.Type.DragEnter, QEvent.Type.DragMove):
+            if hasattr(event, "mimeData") and event.mimeData().hasUrls():
+                urls = event.mimeData().urls()
+                if urls:
+                    local_path = Path(urls[0].toLocalFile())
+                    if local_path.is_dir():
+                        event.acceptProposedAction()
+                        return True
+        elif event.type() == QEvent.Type.Drop:
+            if hasattr(event, "mimeData") and event.mimeData().hasUrls():
+                urls = event.mimeData().urls()
+                if urls:
+                    local_path = Path(urls[0].toLocalFile())
+                    if local_path.is_dir():
+                        self.input_entry.setText(str(local_path.resolve()))
+                        self.save_last_paths()
+                        event.acceptProposedAction()
+                        return True
+        return super().eventFilter(watched, event)
 
     # Методы обзора и открытия папок
     def browse_input(self) -> None:
