@@ -1832,6 +1832,26 @@ class DicomSplitterApp(QMainWindow):
                 "GRADIENT_START": "#E11D48",
                 "GRADIENT_END": "#FDA4AF",
                 "ARROW_RIGHT_PATH": "arrow_right.png"
+            },
+            "sunset": {
+                "MAIN_BG": "#101E2E",
+                "PANEL_BG": "#242F49",
+                "TEXT_COLOR": "#D1D5DB",
+                "TEXT_LIGHT": "#FFA586",
+                "TEXT_MUTED": "#8A9BB4",
+                "BORDER_COLOR": "#384358",
+                "BORDER_COLOR_ALT": "#384358",
+                "BUTTON_BG": "#242F49",
+                "BUTTON_HOVER_BG": "#384358",
+                "BUTTON_PRESSED_BG": "#101E2E",
+                "ACCENT_COLOR": "#B51A2B",
+                "ACCENT_COLOR_DARK": "#9A1624",
+                "ACCENT_COLOR_DEEP": "#541A2E",
+                "PROGRESS_BG": "#101E2E",
+                "PROGRESS_BORDER": "#384358",
+                "GRADIENT_START": "#FFA586",
+                "GRADIENT_END": "#B51A2B",
+                "ARROW_RIGHT_PATH": "arrow_right.png"
             }
         }
 
@@ -2144,17 +2164,7 @@ class DicomSplitterApp(QMainWindow):
             self.theme_combo.addItem(self.loc("theme_dark"), "dark")
             self.theme_combo.addItem(self.loc("theme_light"), "light")
             self.theme_combo.addItem(self.loc("theme_red"), "red")
-            index = self.theme_combo.findData(self.current_theme)
-            if index >= 0:
-                self.theme_combo.setCurrentIndex(index)
-            self.theme_combo.blockSignals(False)
-        
-        if hasattr(self, "theme_combo"):
-            self.theme_combo.blockSignals(True)
-            self.theme_combo.clear()
-            self.theme_combo.addItem(self.loc("theme_dark"), "dark")
-            self.theme_combo.addItem(self.loc("theme_light"), "light")
-            self.theme_combo.addItem(self.loc("theme_red"), "red")
+            self.theme_combo.addItem(self.loc("theme_sunset"), "sunset")
             index = self.theme_combo.findData(self.current_theme)
             if index >= 0:
                 self.theme_combo.setCurrentIndex(index)
