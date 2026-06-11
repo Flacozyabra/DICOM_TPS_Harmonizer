@@ -1791,7 +1791,8 @@ class DicomSplitterApp(QMainWindow):
                 "PROGRESS_BORDER": "#333333",
                 "GRADIENT_START": "#3B82F6",
                 "GRADIENT_END": "#8B5CF6",
-                "ARROW_RIGHT_PATH": "arrow_right.png"
+                "ARROW_RIGHT_PATH": "arrow_right.png",
+                "SPLITTER_COLOR": "#2D2D2D"
             },
             "light": {
                 "MAIN_BG": "#F3F4F6",
@@ -1811,7 +1812,8 @@ class DicomSplitterApp(QMainWindow):
                 "PROGRESS_BORDER": "#D1D5DB",
                 "GRADIENT_START": "#3B82F6",
                 "GRADIENT_END": "#1D4ED8",
-                "ARROW_RIGHT_PATH": "arrow_right_dark.png"
+                "ARROW_RIGHT_PATH": "arrow_right_dark.png",
+                "SPLITTER_COLOR": "#9CA3AF"
             },
             "red": {
                 "MAIN_BG": "#1C0D11",
@@ -1831,7 +1833,8 @@ class DicomSplitterApp(QMainWindow):
                 "PROGRESS_BORDER": "#4E232E",
                 "GRADIENT_START": "#E11D48",
                 "GRADIENT_END": "#FDA4AF",
-                "ARROW_RIGHT_PATH": "arrow_right.png"
+                "ARROW_RIGHT_PATH": "arrow_right.png",
+                "SPLITTER_COLOR": "#4E232E"
             },
             "sunset": {
                 "MAIN_BG": "#101E2E",
@@ -1851,7 +1854,8 @@ class DicomSplitterApp(QMainWindow):
                 "PROGRESS_BORDER": "#384358",
                 "GRADIENT_START": "#FFA586",
                 "GRADIENT_END": "#B51A2B",
-                "ARROW_RIGHT_PATH": "arrow_right.png"
+                "ARROW_RIGHT_PATH": "arrow_right.png",
+                "SPLITTER_COLOR": "#384358"
             }
         }
 
@@ -2689,7 +2693,7 @@ class DicomSplitterApp(QMainWindow):
                 border-color: {palette['ACCENT_COLOR_DARK']};
             }}
             QSplitter::handle {{
-                background-color: {palette['BORDER_COLOR']};
+                background-color: {palette['SPLITTER_COLOR']};
             }}
             QSplitter::handle:horizontal {{
                 width: 3px;
