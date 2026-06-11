@@ -129,6 +129,33 @@ class LanguageSwitch(QFrame):
             self.slider.move(37, 3)
             self.slider_img.setPixmap(self.px_gb)
 
+    def apply_theme(self) -> None:
+        main_win = self.window()
+        if hasattr(main_win, "current_theme") and hasattr(main_win, "THEMES"):
+            palette = main_win.THEMES[main_win.current_theme]
+            frame_bg = palette["PANEL_BG"]
+            frame_border = palette["BORDER_COLOR_ALT"]
+            slider_bg = palette["BUTTON_HOVER_BG"]
+        else:
+            frame_bg = "#2D2D2D"
+            frame_border = "#4B5563"
+            slider_bg = "#4B5563"
+            
+        self.setStyleSheet(f"""
+            QFrame {{
+                background-color: {frame_bg};
+                border: 1px solid {frame_border};
+                border-radius: 15px;
+            }}
+        """)
+        self.slider.setStyleSheet(f"""
+            QFrame {{
+                background-color: {slider_bg};
+                border: none;
+                border-radius: 12px;
+            }}
+        """)
+
     def mousePressEvent(self, event) -> None:
         if self.lang == "ru":
             self.lang = "en"
@@ -1115,63 +1142,135 @@ class DicomViewerPanel(QWidget):
         self.btn_osd.setToolTip(self.parent_app.loc("tooltip_osd") if hasattr(self.parent_app, "loc") else "Показать/скрыть надписи")
         self.btn_close.setToolTip(self.parent_app.loc("tooltip_close_viewer") if hasattr(self.parent_app, "loc") else "Закрыть просмотр")
 
+    def apply_theme(self) -> None:
+        if not hasattr(self, "parent_app") or not hasattr(self.parent_app, "current_theme"):
+            return
+        palette = self.parent_app.THEMES[self.parent_app.current_theme]
+        
+        self.lbl_info.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {palette['TEXT_LIGHT']};")
+        
+        self.cb_presets.setStyleSheet(f"""
+            QComboBox {{
+                background-color: {palette['PANEL_BG']};
+                border: 1px solid {palette['BORDER_COLOR_ALT']};
+                color: {palette['TEXT_COLOR']};
+                selection-background-color: {palette['ACCENT_COLOR']};
+                selection-color: #FFFFFF;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: {palette['PANEL_BG']};
+                border: 1px solid {palette['BORDER_COLOR']};
+                selection-background-color: {palette['ACCENT_COLOR']};
+                selection-color: #FFFFFF;
+                outline: none;
+            }}
+        """)
+        
+        self.hu_panel.setStyleSheet(f"""
+            QFrame {{
+                background-color: {palette['PANEL_BG']};
+                border: 1px solid {palette['BORDER_COLOR']};
+                border-radius: 6px;
+            }}
+            QLabel {{
+                border: none;
+                background: transparent;
+                color: {palette['TEXT_COLOR']};
+            }}
+        """)
+
+        self.slider.setStyleSheet(f"""
+            QSlider::groove:horizontal {{
+                background: {palette['BORDER_COLOR_ALT']};
+                height: 6px;
+                border-radius: 3px;
+            }}
+            QSlider::handle:horizontal {{
+                background: {palette['ACCENT_COLOR']};
+                width: 30px;
+                margin-top: -5px;
+                margin-bottom: -5px;
+                border-radius: 6px;
+            }}
+            QSlider::handle:horizontal:hover {{
+                background: {palette['ACCENT_COLOR_DARK']};
+            }}
+        """)
+        
+        self.update_buttons_style()
+
     def update_buttons_style(self) -> None:
-        style_ruler_active = """
-            QPushButton {
-                background-color: #3B82F6;
-                border: 1px solid #60A5FA;
+        palette = self.parent_app.THEMES[self.parent_app.current_theme] if hasattr(self, "parent_app") and hasattr(self.parent_app, "current_theme") else {
+            "ACCENT_COLOR": "#3B82F6",
+            "ACCENT_COLOR_DARK": "#2563EB",
+            "BUTTON_BG": "#374151",
+            "BORDER_COLOR_ALT": "#4B5563",
+            "BUTTON_HOVER_BG": "#4B5563"
+        }
+        
+        accent_color = palette.get("ACCENT_COLOR", "#3B82F6")
+        accent_dark = palette.get("ACCENT_COLOR_DARK", "#2563EB")
+        
+        btn_bg = palette.get("BUTTON_BG", "#374151")
+        btn_border = palette.get("BORDER_COLOR_ALT", "#4B5563")
+        btn_hover = palette.get("BUTTON_HOVER_BG", "#4B5563")
+
+        style_ruler_active = f"""
+            QPushButton {{
+                background-color: {accent_color};
+                border: 1px solid {accent_dark};
                 border-radius: 4px;
                 padding: 0px;
                 min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px;
-            }
+            }}
         """
-        style_ruler_inactive = """
-            QPushButton {
-                background-color: #374151;
-                border: 1px solid #4B5563;
+        style_ruler_inactive = f"""
+            QPushButton {{
+                background-color: {btn_bg};
+                border: 1px solid {btn_border};
                 border-radius: 4px;
                 padding: 0px;
                 min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px;
-            }
-            QPushButton:hover { background-color: #4B5563; }
+            }}
+            QPushButton:hover {{ background-color: {btn_hover}; }}
         """
-        style_hu_active = """
-            QPushButton {
-                background-color: #3B82F6;
-                border: 1px solid #60A5FA;
+        style_hu_active = f"""
+            QPushButton {{
+                background-color: {accent_color};
+                border: 1px solid {accent_dark};
                 border-radius: 4px;
                 padding: 0px;
                 min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px;
-            }
+            }}
         """
-        style_hu_inactive = """
-            QPushButton {
-                background-color: #374151;
-                border: 1px solid #4B5563;
+        style_hu_inactive = f"""
+            QPushButton {{
+                background-color: {btn_bg};
+                border: 1px solid {btn_border};
                 border-radius: 4px;
                 padding: 0px;
                 min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px;
-            }
-            QPushButton:hover { background-color: #4B5563; }
+            }}
+            QPushButton:hover {{ background-color: {btn_hover}; }}
         """
-        style_osd_active = """
-            QPushButton {
-                background-color: #3B82F6;
-                border: 1px solid #60A5FA;
+        style_osd_active = f"""
+            QPushButton {{
+                background-color: {accent_color};
+                border: 1px solid {accent_dark};
                 border-radius: 4px;
                 padding: 0px;
                 min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px;
-            }
+            }}
         """
-        style_osd_inactive = """
-            QPushButton {
-                background-color: #374151;
-                border: 1px solid #4B5563;
+        style_osd_inactive = f"""
+            QPushButton {{
+                background-color: {btn_bg};
+                border: 1px solid {btn_border};
                 border-radius: 4px;
                 padding: 0px;
                 min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px;
-            }
-            QPushButton:hover { background-color: #4B5563; }
+            }}
+            QPushButton:hover {{ background-color: {btn_hover}; }}
         """
         style_close = """
             QPushButton {
@@ -1653,9 +1752,75 @@ class DicomSplitterApp(QMainWindow):
         self.bridge.tree_scanned_signal.connect(self.on_tree_scanned)
         self.bridge.finished_signal.connect(self.on_processing_finished)
 
+        self.THEMES = {
+            "dark": {
+                "MAIN_BG": "#121212",
+                "PANEL_BG": "#1A1A1A",
+                "TEXT_COLOR": "#D1D5DB",
+                "TEXT_LIGHT": "#FFFFFF",
+                "TEXT_MUTED": "#A0A0A0",
+                "BORDER_COLOR": "#2D2D2D",
+                "BORDER_COLOR_ALT": "#374151",
+                "BUTTON_BG": "#2A2A2A",
+                "BUTTON_HOVER_BG": "#374151",
+                "BUTTON_PRESSED_BG": "#1F2937",
+                "ACCENT_COLOR": "#3B82F6",
+                "ACCENT_COLOR_DARK": "#2563EB",
+                "ACCENT_COLOR_DEEP": "#1D4ED8",
+                "PROGRESS_BG": "#151515",
+                "PROGRESS_BORDER": "#333333",
+                "GRADIENT_START": "#3B82F6",
+                "GRADIENT_END": "#8B5CF6",
+                "ARROW_RIGHT_PATH": "arrow_right.png"
+            },
+            "light": {
+                "MAIN_BG": "#F3F4F6",
+                "PANEL_BG": "#FFFFFF",
+                "TEXT_COLOR": "#374151",
+                "TEXT_LIGHT": "#111827",
+                "TEXT_MUTED": "#6B7280",
+                "BORDER_COLOR": "#D1D5DB",
+                "BORDER_COLOR_ALT": "#E5E7EB",
+                "BUTTON_BG": "#F9FAFB",
+                "BUTTON_HOVER_BG": "#F3F4F6",
+                "BUTTON_PRESSED_BG": "#E5E7EB",
+                "ACCENT_COLOR": "#2563EB",
+                "ACCENT_COLOR_DARK": "#3B82F6",
+                "ACCENT_COLOR_DEEP": "#1D4ED8",
+                "PROGRESS_BG": "#E5E7EB",
+                "PROGRESS_BORDER": "#D1D5DB",
+                "GRADIENT_START": "#3B82F6",
+                "GRADIENT_END": "#1D4ED8",
+                "ARROW_RIGHT_PATH": "arrow_right_dark.png"
+            },
+            "red": {
+                "MAIN_BG": "#1C0D11",
+                "PANEL_BG": "#2D151B",
+                "TEXT_COLOR": "#F9ECED",
+                "TEXT_LIGHT": "#FFFFFF",
+                "TEXT_MUTED": "#D4A3A9",
+                "BORDER_COLOR": "#4E232E",
+                "BORDER_COLOR_ALT": "#6E3241",
+                "BUTTON_BG": "#451E28",
+                "BUTTON_HOVER_BG": "#5C2835",
+                "BUTTON_PRESSED_BG": "#33161E",
+                "ACCENT_COLOR": "#E11D48",
+                "ACCENT_COLOR_DARK": "#BE123C",
+                "ACCENT_COLOR_DEEP": "#9F1239",
+                "PROGRESS_BG": "#2D151B",
+                "PROGRESS_BORDER": "#4E232E",
+                "GRADIENT_START": "#E11D48",
+                "GRADIENT_END": "#FDA4AF",
+                "ARROW_RIGHT_PATH": "arrow_right.png"
+            }
+        }
+
         # Загрузка путей и языка
-        saved_input, saved_output, saved_lang = self.load_last_paths()
+        saved_input, saved_output, saved_lang, saved_theme = self.load_last_paths()
         self.current_lang = saved_lang
+        self.current_theme = saved_theme
+        
+        self.generate_arrow_right_dark()
         
         self.translations: dict[str, str] = {}
         self.load_locale(self.current_lang)
@@ -1747,11 +1912,46 @@ class DicomSplitterApp(QMainWindow):
         config_dir.mkdir(parents=True, exist_ok=True)
         return config_dir / "config.json"
 
-    def load_last_paths(self) -> tuple[str, str, str]:
+    def generate_arrow_right_dark(self) -> None:
+        path = self.project_root / "themes" / "arrow_right_dark.png"
+        if not path.exists():
+            try:
+                from PyQt6.QtGui import QPixmap, QPainter, QPen, QColor
+                from PyQt6.QtCore import Qt, QPointF
+                pixmap = QPixmap(16, 16)
+                pixmap.fill(Qt.GlobalColor.transparent)
+                painter = QPainter(pixmap)
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                pen = QPen(QColor("#1F2937"))
+                pen.setWidthF(2.5)
+                pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+                pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+                painter.setPen(pen)
+                points = [QPointF(5.5, 3.5), QPointF(10.5, 8.0), QPointF(5.5, 12.5)]
+                painter.drawPolyline(points)
+                painter.end()
+                pixmap.save(str(path), "PNG")
+            except Exception:
+                pass
+
+    def on_theme_changed(self, index: int) -> None:
+        theme_name = self.theme_combo.itemData(index)
+        self.change_theme(theme_name)
+
+    def change_theme(self, theme_name: str) -> None:
+        if theme_name not in self.THEMES:
+            theme_name = "dark"
+        self.current_theme = theme_name
+        self.apply_styles()
+        self.save_last_paths()
+        self.set_dark_titlebar()
+
+    def load_last_paths(self) -> tuple[str, str, str, str]:
         config_file = self.get_config_path()
         inp = "Введите путь для папки Dicom_input"
         out = "Введите путь для папки Dicom_output"
         lang = "ru"
+        theme = "dark"
         
         if config_file.exists():
             try:
@@ -1760,20 +1960,24 @@ class DicomSplitterApp(QMainWindow):
                     inp_val = data.get("input_dir", "")
                     out_val = data.get("output_dir", "")
                     lang_val = data.get("language", "ru")
+                    theme_val = data.get("theme", "dark")
                     if inp_val:
                         inp = inp_val
                     if out_val:
                         out = out_val
                     if lang_val:
                         lang = lang_val
+                    if theme_val:
+                        theme = theme_val
             except Exception:
                 pass
-        return inp, out, lang
+        return inp, out, lang, theme
 
     def save_last_paths(self) -> None:
         inp = self.input_entry.text()
         out = self.output_entry.text()
         lang = self.current_lang
+        theme = self.current_theme
         
         config_data = {}
         config_file = self.get_config_path()
@@ -1791,6 +1995,7 @@ class DicomSplitterApp(QMainWindow):
             config_data["output_dir"] = out
             
         config_data["language"] = lang
+        config_data["theme"] = theme
         
         # Сохраняем геометрию главного окна и состояние сплиттеров
         config_data["window_geometry"] = self.saveGeometry().toHex().data().decode('utf-8')
@@ -1892,6 +2097,28 @@ class DicomSplitterApp(QMainWindow):
         self.btn_browse_out.setText(self.loc("browse"))
         self.settings_title.setText(self.loc("optimization_params"))
         
+        if hasattr(self, "theme_combo"):
+            self.theme_combo.blockSignals(True)
+            self.theme_combo.clear()
+            self.theme_combo.addItem(self.loc("theme_dark"), "dark")
+            self.theme_combo.addItem(self.loc("theme_light"), "light")
+            self.theme_combo.addItem(self.loc("theme_red"), "red")
+            index = self.theme_combo.findData(self.current_theme)
+            if index >= 0:
+                self.theme_combo.setCurrentIndex(index)
+            self.theme_combo.blockSignals(False)
+        
+        if hasattr(self, "theme_combo"):
+            self.theme_combo.blockSignals(True)
+            self.theme_combo.clear()
+            self.theme_combo.addItem(self.loc("theme_dark"), "dark")
+            self.theme_combo.addItem(self.loc("theme_light"), "light")
+            self.theme_combo.addItem(self.loc("theme_red"), "red")
+            index = self.theme_combo.findData(self.current_theme)
+            if index >= 0:
+                self.theme_combo.setCurrentIndex(index)
+            self.theme_combo.blockSignals(False)
+        
         self.cb_new_uids.setText(self.loc("generate_uids"))
         self.cb_split_mf.setText(self.loc("split_multiframe"))
         self.cb_clean_tags.setText(self.loc("clean_tags"))
@@ -1926,12 +2153,12 @@ class DicomSplitterApp(QMainWindow):
             try:
                 import ctypes
                 hwnd = int(self.winId())
-                # Атрибут DWMWA_USE_IMMERSIVE_DARK_MODE (20 в Win11, 19 в Win10)
+                is_dark = 0 if self.current_theme == "light" else 1
                 for attr in [20, 19]:
                     ctypes.windll.dwmapi.DwmSetWindowAttribute(
                         hwnd,
                         attr,
-                        ctypes.byref(ctypes.c_int(1)),
+                        ctypes.byref(ctypes.c_int(is_dark)),
                         ctypes.sizeof(ctypes.c_int)
                     )
             except Exception:
@@ -2009,6 +2236,12 @@ class DicomSplitterApp(QMainWindow):
         self.title_label = QLabel()
         self.title_label.setStyleSheet("font-size: 20px; font-weight: bold; color: #FFFFFF;")
         top_layout.addWidget(self.title_label)
+
+        # Выпадающий список выбора цветовой темы
+        self.theme_combo = QComboBox(self.content_frame)
+        self.theme_combo.setFixedWidth(120)
+        self.theme_combo.activated.connect(self.on_theme_changed)
+        top_layout.addWidget(self.theme_combo)
 
         # Слайдер переключения языков
         resources_dir = self.project_root / "themes"
@@ -2200,244 +2433,278 @@ class DicomSplitterApp(QMainWindow):
         self.right_splitter.setSizes([90, 135, 245])     # Размеры по умолчанию
 
     def apply_styles(self) -> None:
-        arrow_right = (self.project_root / "themes" / "arrow_right.png").as_posix()
+        if not hasattr(self, "current_theme") or self.current_theme not in self.THEMES:
+            self.current_theme = "dark"
+            
+        palette = self.THEMES[self.current_theme]
+        
+        if self.current_theme == "light":
+            self.generate_arrow_right_dark()
+            arrow_right = (self.project_root / "themes" / "arrow_right_dark.png").as_posix()
+        else:
+            arrow_right = (self.project_root / "themes" / "arrow_right.png").as_posix()
+            
         arrow_down = (self.project_root / "themes" / "arrow_down.png").as_posix()
         chk_checked = (self.project_root / "themes" / "checkbox_checked.png").as_posix()
         splitter_dots_v = (self.project_root / "themes" / "splitter_dots_v.png").as_posix()
         splitter_dots_h = (self.project_root / "themes" / "splitter_dots_h.png").as_posix()
 
-        qss = """
-            QMainWindow {
-                background-color: #121212;
-            }
-            QDialog {
-                background-color: #1A1A1A;
-                border: 1px solid #2D2D2D;
-            }
-            QWidget {
-                color: #D1D5DB;
+        qss = f"""
+            QMainWindow {{
+                background-color: {palette['MAIN_BG']};
+            }}
+            QDialog {{
+                background-color: {palette['PANEL_BG']};
+                border: 1px solid {palette['BORDER_COLOR']};
+            }}
+            QWidget {{
+                color: {palette['TEXT_COLOR']};
                 font-family: "Segoe UI", Arial, sans-serif;
-            }
-            #sidebar {
-                background-color: #1A1A1A;
-                border-right: 1px solid #2D2D2D;
-            }
-            #groupFrame {
-                background-color: #1A1A1A;
-                border: 1px solid #2D2D2D;
+            }}
+            #sidebar {{
+                background-color: {palette['PANEL_BG']};
+                border-right: 1px solid {palette['BORDER_COLOR']};
+            }}
+            #groupFrame {{
+                background-color: {palette['PANEL_BG']};
+                border: 1px solid {palette['BORDER_COLOR']};
                 border-radius: 8px;
-            }
-            QTreeWidget {
-                background-color: #121212;
-                border: 1px solid #2D2D2D;
+            }}
+            QTreeWidget {{
+                background-color: {palette['MAIN_BG']};
+                border: 1px solid {palette['BORDER_COLOR']};
                 border-radius: 6px;
                 padding: 5px;
-            }
+            }}
             QTreeView::branch,
-            QTreeWidget::branch {
+            QTreeWidget::branch {{
                 background-color: transparent;
                 border-image: none;
                 image: none;
-            }
+            }}
             QTreeView::branch:has-children:closed,
             QTreeView::branch:has-children:closed:has-siblings,
             QTreeWidget::branch:has-children:closed,
-            QTreeWidget::branch:has-children:closed:has-siblings {
+            QTreeWidget::branch:has-children:closed:has-siblings {{
                 border-image: none;
                 image: url(PATH_ARROW_RIGHT);
-            }
+            }}
             QTreeView::branch:has-children:open,
             QTreeView::branch:has-children:open:has-siblings,
             QTreeWidget::branch:has-children:open,
-            QTreeWidget::branch:has-children:open:has-siblings {
+            QTreeWidget::branch:has-children:open:has-siblings {{
                 border-image: none;
                 image: url(PATH_ARROW_DOWN);
-            }
-            QTreeWidget::indicator, QTreeView::indicator {
+            }}
+            QTreeWidget::indicator, QTreeView::indicator {{
                 width: 14px;
                 height: 14px;
-                border: 1px solid #4B5563;
+                border: 1px solid {palette['BORDER_COLOR_ALT']};
                 border-radius: 3px;
-                background-color: #121212;
-            }
-            QTreeWidget::indicator:hover, QTreeView::indicator:hover {
-                border-color: #3B82F6;
-            }
-            QTreeWidget::indicator:checked, QTreeView::indicator:checked {
-                background-color: #2563EB;
-                border-color: #2563EB;
+                background-color: {palette['MAIN_BG']};
+            }}
+            QTreeWidget::indicator:hover, QTreeView::indicator:hover {{
+                border-color: {palette['ACCENT_COLOR']};
+            }}
+            QTreeWidget::indicator:checked, QTreeView::indicator:checked {{
+                background-color: {palette['ACCENT_COLOR_DARK']};
+                border-color: {palette['ACCENT_COLOR_DARK']};
                 image: url(PATH_CHECKBOX_CHECKED);
-            }
-            QTreeWidget::indicator:unchecked, QTreeView::indicator:unchecked {
-                background-color: #121212;
-                border-color: #4B5563;
-            }
-            QScrollBar:vertical {
+            }}
+            QTreeWidget::indicator:unchecked, QTreeView::indicator:unchecked {{
+                background-color: {palette['MAIN_BG']};
+                border-color: {palette['BORDER_COLOR_ALT']};
+            }}
+            QScrollBar:vertical {{
                 border: none;
-                background: #121212;
+                background: {palette['MAIN_BG']};
                 width: 10px;
                 margin: 0px 0px 0px 0px;
-            }
-            QScrollBar::handle:vertical {
-                background: #374151;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {palette['BUTTON_HOVER_BG']};
                 min-height: 20px;
                 border-radius: 5px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background: #4B5563;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background: {palette['BORDER_COLOR_ALT']};
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
                 border: none;
                 background: none;
                 height: 0px;
-            }
-            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+            }}
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
                 background: none;
-            }
-            QScrollBar:horizontal {
+            }}
+            QScrollBar:horizontal {{
                 border: none;
-                background: #121212;
+                background: {palette['MAIN_BG']};
                 height: 10px;
                 margin: 0px 0px 0px 0px;
-            }
-            QScrollBar::handle:horizontal {
-                background: #374151;
+            }}
+            QScrollBar::handle:horizontal {{
+                background: {palette['BUTTON_HOVER_BG']};
                 min-width: 20px;
                 border-radius: 5px;
-            }
-            QScrollBar::handle:horizontal:hover {
-                background: #4B5563;
-            }
-            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+            }}
+            QScrollBar::handle:horizontal:hover {{
+                background: {palette['BORDER_COLOR_ALT']};
+            }}
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
                 border: none;
                 background: none;
                 width: 0px;
-            }
-            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+            }}
+            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{
                 background: none;
-            }
-            QTreeWidget::item {
+            }}
+            QTreeWidget::item {{
                 padding: 6px 4px;
-                color: #E5E7EB;
-            }
-            QTreeWidget::item:hover {
-                background-color: #2A2A2A;
+                color: {palette['TEXT_COLOR']};
+            }}
+            QTreeWidget::item:hover {{
+                background-color: {palette['BUTTON_BG']};
                 border-radius: 4px;
-            }
-            QTreeWidget::item:selected {
-                background-color: #3B82F6;
+            }}
+            QTreeWidget::item:selected {{
+                background-color: {palette['ACCENT_COLOR']};
                 color: #FFFFFF;
                 border-radius: 4px;
-            }
-            QPushButton {
-                background-color: #2A2A2A;
-                border: 1px solid #374151;
+            }}
+            QPushButton {{
+                background-color: {palette['BUTTON_BG']};
+                border: 1px solid {palette['BORDER_COLOR_ALT']};
                 border-radius: 6px;
                 padding: 6px 12px;
                 font-size: 12px;
-                color: #E5E7EB;
-            }
-            QPushButton:hover {
-                background-color: #374151;
-                border-color: #4B5563;
-            }
-            QPushButton:pressed {
-                background-color: #1F2937;
-            }
-            QPushButton#startBtn {
-                background-color: #2563EB;
+                color: {palette['TEXT_COLOR']};
+            }}
+            QPushButton:hover {{
+                background-color: {palette['BUTTON_HOVER_BG']};
+                border-color: {palette['BORDER_COLOR_ALT']};
+            }}
+            QPushButton:pressed {{
+                background-color: {palette['BUTTON_PRESSED_BG']};
+            }}
+            QPushButton#startBtn {{
+                background-color: {palette['ACCENT_COLOR_DARK']};
                 color: #FFFFFF;
                 font-size: 13px;
                 font-weight: bold;
                 border: none;
-            }
-            QPushButton#startBtn:hover {
-                background-color: #3B82F6;
-            }
-            QPushButton#startBtn:pressed {
-                background-color: #1D4ED8;
-            }
-            QPushButton#stopBtn {
+            }}
+            QPushButton#startBtn:hover {{
+                background-color: {palette['ACCENT_COLOR']};
+            }}
+            QPushButton#startBtn:pressed {{
+                background-color: {palette['ACCENT_COLOR_DEEP']};
+            }}
+            QPushButton#stopBtn {{
                 background-color: #EF4444;
                 color: #FFFFFF;
                 font-size: 13px;
                 font-weight: bold;
                 border: none;
-            }
-            QPushButton#stopBtn:hover {
+            }}
+            QPushButton#stopBtn:hover {{
                 background-color: #F87171;
-            }
-            QPushButton#stopBtn:pressed {
+            }}
+            QPushButton#stopBtn:pressed {{
                 background-color: #B91C1C;
-            }
-            QLineEdit {
-                background-color: #121212;
-                border: 1px solid #2D2D2D;
+            }}
+            QLineEdit {{
+                background-color: {palette['MAIN_BG']};
+                border: 1px solid {palette['BORDER_COLOR']};
                 border-radius: 6px;
                 padding: 6px 10px;
-                color: #F3F4F6;
-            }
-            QLineEdit:focus {
-                border-color: #3B82F6;
-            }
-            QTextEdit {
-                background-color: #121212;
-                border: 1px solid #2D2D2D;
+                color: {palette['TEXT_COLOR']};
+            }}
+            QLineEdit:focus {{
+                border-color: {palette['ACCENT_COLOR']};
+            }}
+            QTextEdit {{
+                background-color: {palette['MAIN_BG']};
+                border: 1px solid {palette['BORDER_COLOR']};
                 border-radius: 6px;
-                color: #E5E7EB;
-            }
-            QProgressBar {
-                background-color: #151515;
-                border: 1px solid #333333;
+                color: {palette['TEXT_COLOR']};
+            }}
+            QProgressBar {{
+                background-color: {palette['PROGRESS_BG']};
+                border: 1px solid {palette['PROGRESS_BORDER']};
                 border-radius: 6px;
                 text-align: center;
-                color: #E5E7EB;
+                color: {palette['TEXT_COLOR']};
                 font-weight: bold;
                 font-size: 11px;
-            }
-            QProgressBar::chunk {
-                background-color: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:0, stop:0 #3B82F6, stop:1 #8B5CF6);
+            }}
+            QProgressBar::chunk {{
+                background-color: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:0, stop:0 {palette['GRADIENT_START']}, stop:1 {palette['GRADIENT_END']});
                 border-radius: 5px;
-            }
-            QCheckBox {
+            }}
+            QCheckBox {{
                 spacing: 8px;
-                color: #D1D5DB;
-            }
-            QCheckBox::indicator {
+                color: {palette['TEXT_COLOR']};
+            }}
+            QCheckBox::indicator {{
                 width: 16px;
                 height: 16px;
-                border: 1px solid #4B5563;
+                border: 1px solid {palette['BORDER_COLOR_ALT']};
                 border-radius: 4px;
-                background-color: #121212;
-            }
-            QCheckBox::indicator:hover {
-                border-color: #3B82F6;
-            }
-            QCheckBox::indicator:checked {
-                background-color: #2563EB;
-                border-color: #2563EB;
-            }
-            QSplitter::handle {
-                background-color: #2D2D2D;
-            }
-            QSplitter::handle:horizontal {
+                background-color: {palette['MAIN_BG']};
+            }}
+            QCheckBox::indicator:hover {{
+                border-color: {palette['ACCENT_COLOR']};
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: {palette['ACCENT_COLOR_DARK']};
+                border-color: {palette['ACCENT_COLOR_DARK']};
+            }}
+            QSplitter::handle {{
+                background-color: {palette['BORDER_COLOR']};
+            }}
+            QSplitter::handle:horizontal {{
                 width: 3px;
                 image: url(PATH_SPLITTER_DOTS_V);
-            }
-            QSplitter::handle:vertical {
+            }}
+            QSplitter::handle:vertical {{
                 height: 3px;
                 image: url(PATH_SPLITTER_DOTS_H);
-            }
-            QSplitter::handle:hover {
-                background-color: #3B82F6;
-            }
-            QToolTip {
-                background-color: #1A1A1A;
-                color: #E5E7EB;
-                border: 1px solid #374151;
+            }}
+            QSplitter::handle:hover {{
+                background-color: {palette['ACCENT_COLOR']};
+            }}
+            QToolTip {{
+                background-color: {palette['PANEL_BG']};
+                color: {palette['TEXT_COLOR']};
+                border: 1px solid {palette['BORDER_COLOR_ALT']};
                 border-radius: 4px;
                 padding: 4px;
-            }
+            }}
+            QComboBox {{
+                background-color: {palette['PANEL_BG']};
+                border: 1px solid {palette['BORDER_COLOR_ALT']};
+                border-radius: 6px;
+                padding: 4px 10px;
+                color: {palette['TEXT_COLOR']};
+                min-width: 80px;
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 20px;
+            }}
+            QComboBox::down-arrow {{
+                image: url(PATH_ARROW_DOWN);
+                width: 12px;
+                height: 12px;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: {palette['PANEL_BG']};
+                border: 1px solid {palette['BORDER_COLOR']};
+                selection-background-color: {palette['ACCENT_COLOR']};
+                selection-color: #FFFFFF;
+                outline: none;
+            }}
         """.replace("PATH_ARROW_RIGHT", arrow_right)\
            .replace("PATH_ARROW_DOWN", arrow_down)\
            .replace("PATH_CHECKBOX_CHECKED", chk_checked)\
@@ -2445,6 +2712,26 @@ class DicomSplitterApp(QMainWindow):
            .replace("PATH_SPLITTER_DOTS_H", splitter_dots_h)
 
         QApplication.instance().setStyleSheet(qss)
+        
+        self.sidebar_title.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {palette['TEXT_LIGHT']};")
+        self.selection_label.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {palette['TEXT_MUTED']};")
+        self.title_label.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {palette['TEXT_LIGHT']};")
+        if hasattr(self, "input_label"):
+            self.input_label.setStyleSheet(f"font-weight: bold; color: {palette['TEXT_LIGHT']};")
+        if hasattr(self, "output_label"):
+            self.output_label.setStyleSheet(f"font-weight: bold; color: {palette['TEXT_LIGHT']};")
+        if hasattr(self, "settings_title"):
+            self.settings_title.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {palette['TEXT_LIGHT']};")
+        if hasattr(self, "log_title"):
+            self.log_title.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {palette['TEXT_LIGHT']};")
+        if hasattr(self, "lbl_status"):
+            self.lbl_status.setStyleSheet(f"font-size: 13px; color: {palette['TEXT_COLOR']};")
+            
+        if hasattr(self, "lang_switch"):
+            self.lang_switch.apply_theme()
+            
+        if hasattr(self, "viewer_panel"):
+            self.viewer_panel.apply_theme()
 
     # Методы обзора и открытия папок
     def browse_input(self) -> None:

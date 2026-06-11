@@ -112,5 +112,8 @@
     "tooltip_close_viewer": "Close viewer",
     "hu_panel_title": "HU Parameters",
     "hu_level": "Level: {}",
-    "hu_width": "Width: {}"
+    "hu_width": "Width: {}",
+    "theme_dark": "Dark",
+    "theme_light": "Light",
+    "theme_red": "Red"
 }

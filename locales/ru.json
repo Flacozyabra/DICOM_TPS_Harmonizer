@@ -112,5 +112,8 @@
     "tooltip_close_viewer": "Закрыть просмотр",
     "hu_panel_title": "Параметры HU",
     "hu_level": "Уровень: {}",
-    "hu_width": "Ширина: {}"
+    "hu_width": "Ширина: {}",
+    "theme_dark": "Темная",
+    "theme_light": "Светлая",
+    "theme_red": "Красная"
 }
