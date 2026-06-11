@@ -1090,6 +1090,12 @@ class DicomViewerPanel(QWidget):
     def on_vertical_slider_changed(self, lower: float, upper: float) -> None:
         self.window_width = upper - lower
         self.window_center = (upper + lower) / 2.0
+        
+        # Сбрасываем выбранный пресет при ручной регулировке шкалы
+        self.cb_presets.blockSignals(True)
+        self.cb_presets.setCurrentIndex(-1)
+        self.cb_presets.blockSignals(False)
+        
         self.lbl_upper_hu.setText(f"{int(upper)} HU")
         self.lbl_lower_hu.setText(f"{int(lower)} HU")
         self.update_current_slice_pixels()
@@ -1396,6 +1402,13 @@ class DicomViewerPanel(QWidget):
     def on_window_changed(self, width: float, center: float) -> None:
         self.window_width = width
         self.window_center = center
+        
+        # Если изменение пришло от мыши на изображении, сбрасываем выбранный пресет
+        if self.sender() == self.viewer:
+            self.cb_presets.blockSignals(True)
+            self.cb_presets.setCurrentIndex(-1)
+            self.cb_presets.blockSignals(False)
+            
         if hasattr(self, "hu_panel") and hasattr(self, "hu_slider"):
             lower = center - width / 2.0
             upper = center + width / 2.0
