@@ -1,6 +1,6 @@
 import sys
 from pathlib import Path
-from PyQt6.QtCore import Qt, QPointF
+from PyQt6.QtCore import Qt, QPointF, QPoint
 from PyQt6.QtGui import QGuiApplication, QPixmap, QPainter, QPen, QColor, QPainterPath, QBrush
 
 def main():
@@ -127,23 +127,20 @@ def main():
     pixmap_ruler.fill(Qt.GlobalColor.transparent)
     
     painter = QPainter(pixmap_ruler)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     
     pen_ruler = QPen(QColor("#D1D5DB"))
-    pen_ruler.setWidthF(1.5)
-    pen_ruler.setCapStyle(Qt.PenCapStyle.RoundCap)
-    pen_ruler.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    pen_ruler.setWidth(2)
     painter.setPen(pen_ruler)
     
     # Главная линия
-    painter.drawLine(QPointF(4.5, 19.5), QPointF(19.5, 4.5))
+    painter.drawLine(5, 18, 18, 5)
     # Засечки по краям
-    painter.drawLine(QPointF(2.5, 17.5), QPointF(6.5, 21.5))
-    painter.drawLine(QPointF(17.5, 2.5), QPointF(21.5, 6.5))
+    painter.drawLine(3, 16, 7, 20)
+    painter.drawLine(16, 3, 20, 7)
     # Деления
-    painter.drawLine(QPointF(7.5, 16.5), QPointF(9.5, 18.5))
-    painter.drawLine(QPointF(11.5, 12.5), QPointF(13.5, 14.5))
-    painter.drawLine(QPointF(15.5, 8.5), QPointF(17.5, 10.5))
+    painter.drawLine(8, 13, 10, 15)
+    painter.drawLine(11, 12, 13, 14)
+    painter.drawLine(13, 8, 15, 10)
     painter.end()
     
     pixmap_ruler.save(str(themes_dir / "ruler.png"), "PNG")
@@ -154,17 +151,17 @@ def main():
     pixmap_hu.fill(Qt.GlobalColor.transparent)
     
     painter = QPainter(pixmap_hu)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     
-    pen_hu = QPen(QColor("#D1D5DB"))
-    pen_hu.setWidthF(1.5)
-    painter.setPen(pen_hu)
-    
-    # Заливка правой части
+    # Заливка правой части (без обводки)
+    painter.setPen(Qt.PenStyle.NoPen)
     painter.setBrush(QBrush(QColor("#D1D5DB")))
     painter.drawChord(4, 4, 16, 16, -90 * 16, 180 * 16)
-    # Контур левой части (рисуем весь круг без заливки)
-    painter.setBrush(QBrush(Qt.GlobalColor.transparent))
+    
+    # Контур всего круга (без заливки)
+    pen_hu = QPen(QColor("#D1D5DB"))
+    pen_hu.setWidth(2)
+    painter.setPen(pen_hu)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
     painter.drawEllipse(4, 4, 16, 16)
     painter.end()
     
@@ -176,27 +173,51 @@ def main():
     pixmap_eye.fill(Qt.GlobalColor.transparent)
     
     painter = QPainter(pixmap_eye)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     
     pen_eye = QPen(QColor("#D1D5DB"))
-    pen_eye.setWidthF(1.5)
+    pen_eye.setWidth(2)
     painter.setPen(pen_eye)
     
     # Контур глаза
-    path = QPainterPath()
-    path.moveTo(3.0, 12.0)
-    path.quadTo(12.0, 4.5, 21.0, 12.0)
-    path.quadTo(12.0, 19.5, 3.0, 12.0)
-    painter.drawPath(path)
+    points_eye = [
+        QPoint(3, 12),
+        QPoint(7, 8),
+        QPoint(12, 7),
+        QPoint(17, 8),
+        QPoint(21, 12),
+        QPoint(17, 16),
+        QPoint(12, 17),
+        QPoint(7, 16),
+        QPoint(3, 12)
+    ]
+    painter.drawPolyline(points_eye)
     
-    # Зрачок
+    # Зрачок в центре
+    painter.setPen(Qt.PenStyle.NoPen)
     painter.setBrush(QBrush(QColor("#D1D5DB")))
-    painter.drawEllipse(QPointF(12.0, 12.0), 3.2, 3.2)
+    painter.drawEllipse(9, 9, 6, 6)
     painter.end()
     
     pixmap_eye.save(str(themes_dir / "eye.png"), "PNG")
     print("Generated eye.png")
 
+    # 9. close.png (Монохромный крестик закрытия, 24x24, #D1D5DB)
+    pixmap_close = QPixmap(24, 24)
+    pixmap_close.fill(Qt.GlobalColor.transparent)
+    
+    painter = QPainter(pixmap_close)
+    
+    pen_close = QPen(QColor("#D1D5DB"))
+    pen_close.setWidth(2)
+    painter.setPen(pen_close)
+    
+    # Две диагональные линии
+    painter.drawLine(6, 6, 17, 17)
+    painter.drawLine(17, 6, 6, 17)
+    painter.end()
+    
+    pixmap_close.save(str(themes_dir / "close.png"), "PNG")
+    print("Generated close.png")
 
 
 if __name__ == "__main__":

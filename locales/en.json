@@ -109,6 +109,7 @@
     "tooltip_osd": "Show/hide overlay text",
     "tooltip_ruler": "Toggle ruler",
     "tooltip_hu": "Adjust HU window (contrast)",
+    "tooltip_close_viewer": "Close viewer",
     "hu_panel_title": "HU Parameters",
     "hu_level": "Level: {}",
     "hu_width": "Width: {}"

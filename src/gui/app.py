@@ -758,11 +758,13 @@ class DicomViewerPanel(QWidget):
         self.img_ruler = QIcon(str(resources_dir / "ruler.png"))
         self.img_hu = QIcon(str(resources_dir / "hu.png"))
         self.img_osd = QIcon(str(resources_dir / "eye.png"))
+        self.img_close = QIcon(str(resources_dir / "close.png"))
 
         # Кнопка линейки
         self.btn_ruler = QPushButton(self)
         self.btn_ruler.setIcon(self.img_ruler)
         self.btn_ruler.setIconSize(QSize(20, 20))
+        self.btn_ruler.setFixedSize(28, 28)
         self.btn_ruler.setToolTip(self.parent_app.loc("tooltip_ruler") if hasattr(self.parent_app, "loc") else "Линейка")
         self.btn_ruler.clicked.connect(self.toggle_ruler)
         top_layout.addWidget(self.btn_ruler)
@@ -771,6 +773,7 @@ class DicomViewerPanel(QWidget):
         self.btn_hu = QPushButton(self)
         self.btn_hu.setIcon(self.img_hu)
         self.btn_hu.setIconSize(QSize(20, 20))
+        self.btn_hu.setFixedSize(28, 28)
         self.btn_hu.setToolTip(self.parent_app.loc("tooltip_hu") if hasattr(self.parent_app, "loc") else "Настройка окна HU")
         self.btn_hu.clicked.connect(self.toggle_hu)
         top_layout.addWidget(self.btn_hu)
@@ -779,27 +782,18 @@ class DicomViewerPanel(QWidget):
         self.btn_osd = QPushButton(self)
         self.btn_osd.setIcon(self.img_osd)
         self.btn_osd.setIconSize(QSize(20, 20))
+        self.btn_osd.setFixedSize(28, 28)
         self.btn_osd.setToolTip(self.parent_app.loc("tooltip_osd") if hasattr(self.parent_app, "loc") else "Показать/скрыть надписи")
         self.btn_osd.clicked.connect(self.toggle_osd)
         top_layout.addWidget(self.btn_osd)
 
         # Кнопка закрытия
-        self.btn_close = QPushButton(self.parent_app.loc("viewer_close"), self)
+        self.btn_close = QPushButton(self)
+        self.btn_close.setIcon(self.img_close)
+        self.btn_close.setIconSize(QSize(20, 20))
+        self.btn_close.setFixedSize(28, 28)
+        self.btn_close.setToolTip(self.parent_app.loc("tooltip_close_viewer") if hasattr(self.parent_app, "loc") else "Закрыть просмотр")
         self.btn_close.clicked.connect(self.close_requested.emit)
-        self.btn_close.setStyleSheet("""
-            QPushButton {
-                background-color: #374151;
-                border: 1px solid #4B5563;
-                color: #FFFFFF;
-                padding: 0px 12px;
-                border-radius: 4px;
-                min-height: 28px;
-                max-height: 28px;
-            }
-            QPushButton:hover {
-                background-color: #4B5563;
-            }
-        """)
         top_layout.addWidget(self.btn_close)
         
         layout.addLayout(top_layout)
@@ -935,6 +929,7 @@ class DicomViewerPanel(QWidget):
         self.btn_ruler.setToolTip(self.parent_app.loc("tooltip_ruler") if hasattr(self.parent_app, "loc") else "Линейка")
         self.btn_hu.setToolTip(self.parent_app.loc("tooltip_hu") if hasattr(self.parent_app, "loc") else "Настройка окна HU")
         self.btn_osd.setToolTip(self.parent_app.loc("tooltip_osd") if hasattr(self.parent_app, "loc") else "Показать/скрыть надписи")
+        self.btn_close.setToolTip(self.parent_app.loc("tooltip_close_viewer") if hasattr(self.parent_app, "loc") else "Закрыть просмотр")
 
         if hasattr(self, "hu_panel"):
             self.lbl_hu_title.setText(self.parent_app.loc("hu_panel_title") if hasattr(self.parent_app, "loc") else "Параметры HU")
@@ -947,6 +942,7 @@ class DicomViewerPanel(QWidget):
                 background-color: #3B82F6;
                 border: 1px solid #60A5FA;
                 border-radius: 4px;
+                padding: 0px;
                 min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px;
             }
         """
@@ -955,6 +951,7 @@ class DicomViewerPanel(QWidget):
                 background-color: #374151;
                 border: 1px solid #4B5563;
                 border-radius: 4px;
+                padding: 0px;
                 min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px;
             }
             QPushButton:hover { background-color: #4B5563; }
@@ -964,6 +961,7 @@ class DicomViewerPanel(QWidget):
                 background-color: #10B981;
                 border: 1px solid #34D399;
                 border-radius: 4px;
+                padding: 0px;
                 min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px;
             }
         """
@@ -972,6 +970,7 @@ class DicomViewerPanel(QWidget):
                 background-color: #374151;
                 border: 1px solid #4B5563;
                 border-radius: 4px;
+                padding: 0px;
                 min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px;
             }
             QPushButton:hover { background-color: #4B5563; }
@@ -981,6 +980,7 @@ class DicomViewerPanel(QWidget):
                 background-color: #3B82F6;
                 border: 1px solid #60A5FA;
                 border-radius: 4px;
+                padding: 0px;
                 min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px;
             }
         """
@@ -989,6 +989,17 @@ class DicomViewerPanel(QWidget):
                 background-color: #374151;
                 border: 1px solid #4B5563;
                 border-radius: 4px;
+                padding: 0px;
+                min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px;
+            }
+            QPushButton:hover { background-color: #4B5563; }
+        """
+        style_close = """
+            QPushButton {
+                background-color: #374151;
+                border: 1px solid #4B5563;
+                border-radius: 4px;
+                padding: 0px;
                 min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px;
             }
             QPushButton:hover { background-color: #4B5563; }
@@ -997,6 +1008,7 @@ class DicomViewerPanel(QWidget):
         self.btn_ruler.setStyleSheet(style_ruler_active if self.viewer.ruler_active else style_ruler_inactive)
         self.btn_hu.setStyleSheet(style_hu_active if self.viewer.hu_active else style_hu_inactive)
         self.btn_osd.setStyleSheet(style_osd_active if self.viewer.osd_visible else style_osd_inactive)
+        self.btn_close.setStyleSheet(style_close)
 
     def toggle_osd(self) -> None:
         self.viewer.set_osd_visible(not self.viewer.osd_visible)
