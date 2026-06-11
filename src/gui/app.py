@@ -1856,6 +1856,27 @@ class DicomSplitterApp(QMainWindow):
                 "GRADIENT_END": "#B51A2B",
                 "ARROW_RIGHT_PATH": "arrow_right.png",
                 "SPLITTER_COLOR": "#384358"
+            },
+            "cyber": {
+                "MAIN_BG": "#0F0F0F",
+                "PANEL_BG": "#202020",
+                "TEXT_COLOR": "#D1D5DB",
+                "TEXT_LIGHT": "#F8F8F8",
+                "TEXT_MUTED": "#808080",
+                "BORDER_COLOR": "#337418",
+                "BORDER_COLOR_ALT": "#337418",
+                "BUTTON_BG": "#202020",
+                "BUTTON_HOVER_BG": "#337418",
+                "BUTTON_PRESSED_BG": "#0F0F0F",
+                "ACCENT_COLOR": "#5DD62C",
+                "ACCENT_COLOR_DARK": "#4CB323",
+                "ACCENT_COLOR_DEEP": "#337418",
+                "PROGRESS_BG": "#0F0F0F",
+                "PROGRESS_BORDER": "#337418",
+                "GRADIENT_START": "#5DD62C",
+                "GRADIENT_END": "#337418",
+                "ARROW_RIGHT_PATH": "arrow_right.png",
+                "SPLITTER_COLOR": "#337418"
             }
         }
 
@@ -2169,6 +2190,7 @@ class DicomSplitterApp(QMainWindow):
             self.theme_combo.addItem(self.loc("theme_light"), "light")
             self.theme_combo.addItem(self.loc("theme_red"), "red")
             self.theme_combo.addItem(self.loc("theme_sunset"), "sunset")
+            self.theme_combo.addItem(self.loc("theme_cyber"), "cyber")
             index = self.theme_combo.findData(self.current_theme)
             if index >= 0:
                 self.theme_combo.setCurrentIndex(index)
