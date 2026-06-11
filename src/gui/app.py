@@ -1175,13 +1175,19 @@ class DicomViewerPanel(QWidget):
         """
         style_close = """
             QPushButton {
-                background-color: #374151;
-                border: 1px solid #4B5563;
+                background-color: #BE123C;
+                border: 1px solid #E11D48;
                 border-radius: 4px;
                 padding: 0px;
                 min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px;
             }
-            QPushButton:hover { background-color: #4B5563; }
+            QPushButton:hover {
+                background-color: #E11D48;
+                border-color: #F43F5E;
+            }
+            QPushButton:pressed {
+                background-color: #9F1239;
+            }
         """
 
         self.btn_ruler.setStyleSheet(style_ruler_active if self.viewer.ruler_active else style_ruler_inactive)
