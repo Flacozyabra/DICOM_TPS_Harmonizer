@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
     QGridLayout, QMessageBox, QApplication, QSplitter, QSizePolicy,
     QSlider, QStackedWidget, QComboBox
 )
-from PyQt6.QtGui import QIcon, QFont, QTextCursor, QPixmap, QBrush, QColor, QPainter, QPen, QImage, QLinearGradient, QPolygon
+from PyQt6.QtGui import QIcon, QFont, QTextCursor, QPixmap, QBrush, QColor, QPainter, QPen, QImage, QLinearGradient, QPolygon, QDragEnterEvent, QDropEvent
 
 from src.core.config import ProcessingConfig
 from src.core.processor import DicomProcessor
@@ -1762,6 +1762,7 @@ class DicomSplitterApp(QMainWindow):
 
         self.setMinimumSize(1000, 640)
         self.resize(1100, 720)
+        self.setAcceptDrops(True)
 
         # Инициализация моста сигналов
         self.bridge = QtSignalBridge()
@@ -2748,6 +2749,20 @@ class DicomSplitterApp(QMainWindow):
             
         if hasattr(self, "viewer_panel"):
             self.viewer_panel.apply_theme()
+
+    # Drag and Drop поддержка перетаскивания папок
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        urls = event.mimeData().urls()
+        if urls:
+            local_path = Path(urls[0].toLocalFile())
+            if local_path.is_dir():
+                self.input_entry.setText(str(local_path.resolve()))
+                self.save_last_paths()
+                self.run_input_scan()
 
     # Методы обзора и открытия папок
     def browse_input(self) -> None:
