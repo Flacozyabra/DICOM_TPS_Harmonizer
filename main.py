@@ -20,6 +20,8 @@ except ImportError as e:
     import_error_msg = str(e)
 
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()
     if not pyqt_available:
         try:
             import ctypes
