@@ -25,21 +25,34 @@ from src.core.processor import DicomProcessor
 from src.utils.logger import BaseLogger
 
 def set_dark_titlebar(window: QWidget) -> None:
-    """Окрашивает верхнюю полосу заголовка окна в темный цвет на Windows."""
+    """Окрашивает верхнюю полосу заголовка окна в темный или светлый цвет на Windows в зависимости от темы."""
     if platform.system() == "Windows":
         try:
             import ctypes
             hwnd = int(window.winId())
+            
+            # Находим тему, обходя родителей
+            theme = "dark"
+            p = window
+            while p:
+                if hasattr(p, "current_theme"):
+                    theme = p.current_theme
+                    break
+                p = p.parent()
+                
+            is_dark = 0 if theme == "light" else 1
+            
             # Атрибут DWMWA_USE_IMMERSIVE_DARK_MODE (20 в Win11, 19 в Win10)
             for attr in [20, 19]:
                 ctypes.windll.dwmapi.DwmSetWindowAttribute(
                     hwnd,
                     attr,
-                    ctypes.byref(ctypes.c_int(1)),
+                    ctypes.byref(ctypes.c_int(is_dark)),
                     ctypes.sizeof(ctypes.c_int)
                 )
         except Exception:
             pass
+
 
 # Сигнальный мост для безопасной передачи сообщений из фоновых потоков в GUI
 class QtSignalBridge(QObject):
