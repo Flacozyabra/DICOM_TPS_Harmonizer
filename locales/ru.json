@@ -117,5 +117,7 @@
     "theme_light": "Светлая",
     "theme_red": "Красная",
     "theme_sunset": "Закат",
-    "theme_cyber": "Кибер"
+    "theme_cyber": "Кибер",
+    "log_series_success": "[{}] {} ({}) | {} | {} -> успешно сохранено {} срезов",
+    "log_series_warning": "[{}] {} ({}) | {} | {} -> сохранено {} срезов, {} ошибок"
 }

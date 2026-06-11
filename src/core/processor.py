@@ -6,7 +6,7 @@ import sys
 import threading
 import traceback
 from typing import Any, Dict, List, Set, Union
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 
 import numpy as np
 import pydicom
@@ -32,26 +32,14 @@ SOP_CLASS_MAPPING = {
 DEFAULT_SOP_CLASS = '1.2.840.10008.5.1.4.1.1.7'  # Secondary Capture Image Storage
 
 
-def _process_single_file_task(task: dict) -> dict:
-    """Глобальный воркер для обработки одного DICOM файла в дочернем процессе.
+def _process_batch_task(batch_task: dict) -> dict:
+    """Глобальный воркер для обработки пакета (серии) DICOM файлов в одном дочернем процессе.
 
-    Принимает словарь параметров задачи и возвращает результат обработки.
+    Принимает словарь параметров задачи и обрабатывает список файлов, входящих в пакет.
     """
-    file_path = task['file_path']
-    dest_dir = task['dest_dir']
-    pat_name = task['pat_name']
-    pat_id = task['pat_id']
-    study_uid_mapped = task['study_uid_mapped']
-    series_uid_mapped = task['series_uid_mapped']
-    for_uid_mapped = task['for_uid_mapped']
-    sop_class = task['sop_class']
-    config = task['config']
-    instance_number = task['instance_number']
-    segment_idx = task['segment_idx']
-    modality = task['modality']
-    series_folder = task['series_folder']
-
-    filename = file_path.name
+    tasks = batch_task['tasks']
+    config = batch_task['config']
+    
     results = {
         'status': 'success',
         'logs': [],
@@ -59,51 +47,120 @@ def _process_single_file_task(task: dict) -> dict:
         'error_count': 0,
         'no_pixel_count': 0,
     }
-
-    try:
-        ds_full = safe_dcmread(file_path, stop_before_pixels=False)
-        
-        # Защита от файлов без пикселей
-        has_pixels = any(tag in ds_full for tag in ['PixelData', 'FloatPixelData', 'DoubleFloatPixelData'])
-        if not has_pixels:
-            results['no_pixel_count'] = 1
-            return results
-
-        pixel_array = ds_full.pixel_array
-    except Exception as e:
-        import traceback
-        tb = traceback.format_exc()
-        results['status'] = 'error'
-        results['error_count'] = 1
-        results['logs'].append(('log_pixel_error', filename, str(e)))
-        results['logs'].append(('traceback', tb))
+    
+    if not tasks:
         return results
 
-    is_multiframe = hasattr(ds_full, 'NumberOfFrames') and int(ds_full.NumberOfFrames) > 1
-
-    if is_multiframe and config.split_multiframe:
-        n_frames = int(ds_full.NumberOfFrames)
-        results['logs'].append(('log_split_multiframe', filename, n_frames))
-
-        shared_info = ds_full.SharedFunctionalGroupsSequence[0] if hasattr(ds_full, 'SharedFunctionalGroupsSequence') else None
+    # Для агрегации логов по всей серии
+    first_task = tasks[0]
+    modality = first_task['modality']
+    pat_name = first_task['pat_name']
+    pat_id = first_task['pat_id']
+    series_folder = first_task['series_folder']
+    
+    series_success = 0
+    series_errors = 0
+    
+    for task in tasks:
+        file_path = task['file_path']
+        dest_dir = task['dest_dir']
+        study_uid_mapped = task['study_uid_mapped']
+        series_uid_mapped = task['series_uid_mapped']
+        for_uid_mapped = task['for_uid_mapped']
+        sop_class = task['sop_class']
+        instance_number = task['instance_number']
+        segment_idx = task['segment_idx']
         
-        if config.new_uids or segment_idx > 0:
-            from pydicom.uid import generate_uid
-            current_series_uid = generate_uid()
+        filename = file_path.name
+        
+        try:
+            ds_full = safe_dcmread(file_path, stop_before_pixels=False)
+            
+            # Защита от файлов без пикселей
+            has_pixels = any(tag in ds_full for tag in ['PixelData', 'FloatPixelData', 'DoubleFloatPixelData'])
+            if not has_pixels:
+                results['no_pixel_count'] += 1
+                continue
+                
+            pixel_array = ds_full.pixel_array
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            results['status'] = 'error'
+            results['error_count'] += 1
+            series_errors += 1
+            results['logs'].append(('log_pixel_error', filename, str(e)))
+            results['logs'].append(('traceback', tb))
+            continue
+
+        is_multiframe = hasattr(ds_full, 'NumberOfFrames') and int(ds_full.NumberOfFrames) > 1
+
+        if is_multiframe and config.split_multiframe:
+            n_frames = int(ds_full.NumberOfFrames)
+            results['logs'].append(('log_split_multiframe', filename, n_frames))
+
+            shared_info = ds_full.SharedFunctionalGroupsSequence[0] if hasattr(ds_full, 'SharedFunctionalGroupsSequence') else None
+            
+            if config.new_uids or segment_idx > 0:
+                from pydicom.uid import generate_uid
+                current_series_uid = generate_uid()
+            else:
+                current_series_uid = series_uid_mapped
+
+            multiframe_errors = 0
+            for i in range(n_frames):
+                frame_info = ds_full.PerFrameFunctionalGroupsSequence[i] if hasattr(ds_full, 'PerFrameFunctionalGroupsSequence') else None
+
+                try:
+                    cleaned_ds = clean_and_build_dataset(
+                        src_ds=ds_full,
+                        pixel_data=pixel_array[i],
+                        instance_number=i + 1,
+                        study_uid=study_uid_mapped,
+                        series_uid=current_series_uid,
+                        sop_class=sop_class,
+                        for_uid=for_uid_mapped,
+                        config=config
+                    )
+
+                    cleaned_ds.PatientName = pat_name
+                    cleaned_ds.PatientID = pat_id
+
+                    copy_geometry_and_rescale(
+                        src_ds=ds_full,
+                        new_ds=cleaned_ds,
+                        frame_info=frame_info,
+                        shared_info=shared_info,
+                        is_multiframe=True,
+                        frame_idx=i
+                    )
+
+                    out_path = dest_dir / f"slice_{i+1:04d}.dcm"
+                    save_dicom_file(out_path, cleaned_ds, config.explicit_vr)
+                    results['success_count'] += 1
+                    series_success += 1
+                except Exception as e:
+                    import traceback
+                    tb = traceback.format_exc()
+                    results['logs'].append(('log_frame_save_error', i + 1, filename, str(e)))
+                    results['logs'].append(('traceback', tb))
+                    multiframe_errors += 1
+                    results['error_count'] += 1
+                    series_errors += 1
+
+            if multiframe_errors == 0:
+                results['logs'].append(('log_split_success', modality, pat_name, pat_id, series_folder, filename, n_frames))
+            else:
+                results['logs'].append(('log_split_warning', modality, pat_name, pat_id, series_folder, filename, multiframe_errors))
+
         else:
-            current_series_uid = series_uid_mapped
-
-        multiframe_errors = 0
-        for i in range(n_frames):
-            frame_info = ds_full.PerFrameFunctionalGroupsSequence[i] if hasattr(ds_full, 'PerFrameFunctionalGroupsSequence') else None
-
             try:
                 cleaned_ds = clean_and_build_dataset(
                     src_ds=ds_full,
-                    pixel_data=pixel_array[i],
-                    instance_number=i + 1,
+                    pixel_data=pixel_array,
+                    instance_number=instance_number,
                     study_uid=study_uid_mapped,
-                    series_uid=current_series_uid,
+                    series_uid=series_uid_mapped,
                     sop_class=sop_class,
                     for_uid=for_uid_mapped,
                     config=config
@@ -115,66 +172,42 @@ def _process_single_file_task(task: dict) -> dict:
                 copy_geometry_and_rescale(
                     src_ds=ds_full,
                     new_ds=cleaned_ds,
-                    frame_info=frame_info,
-                    shared_info=shared_info,
-                    is_multiframe=True,
-                    frame_idx=i
+                    frame_info=None,
+                    shared_info=None,
+                    is_multiframe=False,
+                    frame_idx=0
                 )
 
-                out_path = dest_dir / f"slice_{i+1:04d}.dcm"
+                out_path = dest_dir / f"slice_{instance_number:04d}.dcm"
                 save_dicom_file(out_path, cleaned_ds, config.explicit_vr)
                 results['success_count'] += 1
+                series_success += 1
             except Exception as e:
                 import traceback
                 tb = traceback.format_exc()
-                results['logs'].append(('log_frame_save_error', i + 1, filename, str(e)))
+                results['logs'].append(('log_save_error', filename, str(e)))
                 results['logs'].append(('traceback', tb))
-                multiframe_errors += 1
                 results['error_count'] += 1
+                series_errors += 1
+                results['status'] = 'error'
 
-        if multiframe_errors == 0:
-            results['logs'].append(('log_split_success', modality, pat_name, pat_id, series_folder, filename, n_frames))
+    # Добавляем агрегированный лог по серии
+    if series_success > 0:
+        if series_errors == 0:
+            results['logs'].append(('log_series_success', modality, pat_name, pat_id, series_folder, series_success))
         else:
-            results['logs'].append(('log_split_warning', modality, pat_name, pat_id, series_folder, filename, multiframe_errors))
-
-    else:
-        try:
-            cleaned_ds = clean_and_build_dataset(
-                src_ds=ds_full,
-                pixel_data=pixel_array,
-                instance_number=instance_number,
-                study_uid=study_uid_mapped,
-                series_uid=series_uid_mapped,
-                sop_class=sop_class,
-                for_uid=for_uid_mapped,
-                config=config
-            )
-
-            cleaned_ds.PatientName = pat_name
-            cleaned_ds.PatientID = pat_id
-
-            copy_geometry_and_rescale(
-                src_ds=ds_full,
-                new_ds=cleaned_ds,
-                frame_info=None,
-                shared_info=None,
-                is_multiframe=False,
-                frame_idx=0
-            )
-
-            out_path = dest_dir / f"slice_{instance_number:04d}.dcm"
-            save_dicom_file(out_path, cleaned_ds, config.explicit_vr)
-            results['logs'].append(('log_save_slice', modality, pat_name, pat_id, series_folder, filename, instance_number))
-            results['success_count'] += 1
-        except Exception as e:
-            import traceback
-            tb = traceback.format_exc()
-            results['logs'].append(('log_save_error', filename, str(e)))
-            results['logs'].append(('traceback', tb))
-            results['error_count'] += 1
-            results['status'] = 'error'
+            results['logs'].append(('log_series_warning', modality, pat_name, pat_id, series_folder, series_success, series_errors))
 
     return results
+
+
+def _read_header_task(file_path: Path) -> tuple:
+    """Вспомогательная функция для параллельного чтения заголовков DICOM файлов."""
+    try:
+        ds = safe_dcmread(file_path, stop_before_pixels=True)
+        return file_path, ds, None
+    except Exception as e:
+        return file_path, None, e
 
 
 class DicomProcessor:
@@ -287,48 +320,53 @@ class DicomProcessor:
             self.excluded_count = 0
             start_time = datetime.now()
 
-            # Группируем файлы по сериям для предварительного анализа (быстрый проход по заголовкам)
+            # Группируем файлы по сериям для предварительного анализа (параллельный быстрый проход)
             series_groups = {}
-            for file_path in all_files:
+            
+            # Используем ThreadPoolExecutor для параллельного чтения заголовков (I/O)
+            with ThreadPoolExecutor(max_workers=32) as header_executor:
                 if self.stop_event.is_set():
                     self.logger.log(self.loc("log_stop_user"), "warning")
-                    break
+                    return
+                
+                header_futures = [header_executor.submit(_read_header_task, fp) for fp in all_files]
+                for fut in as_completed(header_futures):
+                    if self.stop_event.is_set():
+                        self.logger.log(self.loc("log_stop_user"), "warning")
+                        break
+                    
+                    file_path, ds, err = fut.result()
+                    filename = file_path.name
+                    if err is not None:
+                        if isinstance(err, ValueError):
+                            self.logger.log(self.loc("log_non_dicom", filename, str(err)), "warning")
+                            self.non_dicom_count += 1
+                        else:
+                            self.logger.log(self.loc("log_read_error", filename, str(err)), "error")
+                            self.error_count += 1
+                        self.processed_count += 1
+                        self.logger.update_progress(self.processed_count, total_files)
+                        continue
+                    
+                    pat_name = getattr(ds, 'PatientName', 'UNKNOWN')
+                    pat_id = getattr(ds, 'PatientID', 'UNKNOWN')
 
-                filename = file_path.name
-                try:
-                    ds = safe_dcmread(file_path, stop_before_pixels=True)
-                except ValueError as e:
-                    self.logger.log(self.loc("log_non_dicom", filename, e), "warning")
-                    self.non_dicom_count += 1
-                    self.processed_count += 1
-                    self.logger.update_progress(self.processed_count, total_files)
-                    continue
-                except Exception as e:
-                    self.logger.log(self.loc("log_read_error", filename, e), "error")
-                    self.error_count += 1
-                    self.processed_count += 1
-                    self.logger.update_progress(self.processed_count, total_files)
-                    continue
+                    if self.patient_overrides and (str(pat_name), str(pat_id)) in self.patient_overrides:
+                        pat_name, pat_id = self.patient_overrides[(str(pat_name), str(pat_id))]
 
-                pat_name = getattr(ds, 'PatientName', 'UNKNOWN')
-                pat_id = getattr(ds, 'PatientID', 'UNKNOWN')
+                    study_uid = getattr(ds, 'StudyInstanceUID', 'unknown_study')
+                    series_uid = getattr(ds, 'SeriesInstanceUID', 'unknown_series')
 
-                if self.patient_overrides and (str(pat_name), str(pat_id)) in self.patient_overrides:
-                    pat_name, pat_id = self.patient_overrides[(str(pat_name), str(pat_id))]
+                    if not pat_name:
+                        pat_name = "UNKNOWN"
+                    if not pat_id:
+                        pat_id = "UNKNOWN"
 
-                study_uid = getattr(ds, 'StudyInstanceUID', 'unknown_study')
-                series_uid = getattr(ds, 'SeriesInstanceUID', 'unknown_series')
+                    key = (str(pat_name), str(pat_id), str(study_uid), str(series_uid))
+                    series_groups.setdefault(key, []).append((file_path, ds))
 
-                if not pat_name:
-                    pat_name = "UNKNOWN"
-                if not pat_id:
-                    pat_id = "UNKNOWN"
-
-                key = (str(pat_name), str(pat_id), str(study_uid), str(series_uid))
-                series_groups.setdefault(key, []).append((file_path, ds))
-
-            # Собираем все задачи
-            all_tasks = []
+            # Собираем все подзадачи
+            sub_tasks = []
             for (pat_name, pat_id, study_uid, series_uid), items in series_groups.items():
                 if self.stop_event.is_set():
                     break
@@ -350,26 +388,42 @@ class DicomProcessor:
                     for ori_key, group_items in sorted(orientation_groups.items(), key=lambda x: str(x[0])):
                         self._prepare_tasks_for_segment(
                             pat_name, pat_id, study_uid, series_uid,
-                            group_items, segment_idx=seg_idx, total_files=total_files, tasks_list=all_tasks
+                            group_items, segment_idx=seg_idx, total_files=total_files, tasks_list=sub_tasks
                         )
                         seg_idx += 1
                 else:
                     self._prepare_tasks_for_segment(
                         pat_name, pat_id, study_uid, series_uid,
-                        items, segment_idx=0, total_files=total_files, tasks_list=all_tasks
+                        items, segment_idx=0, total_files=total_files, tasks_list=sub_tasks
                     )
 
+            # Группируем sub_tasks по series_uid_mapped, чтобы каждая серия обрабатывалась
+            # в своем пакете (или делим серии на чанки по 50 файлов для балансировки нагрузки)
+            from collections import defaultdict
+            series_tasks = defaultdict(list)
+            for task in sub_tasks:
+                series_tasks[task['series_uid_mapped']].append(task)
+                
+            batch_tasks = []
+            for s_uid, s_tasks in series_tasks.items():
+                chunk_size = 50
+                for i in range(0, len(s_tasks), chunk_size):
+                    batch_tasks.append({
+                        'tasks': s_tasks[i:i + chunk_size],
+                        'config': self.config
+                    })
+
             # Выполняем задачи в пуле процессов
-            if all_tasks and not self.stop_event.is_set():
+            if batch_tasks and not self.stop_event.is_set():
                 num_workers = max(1, (os.cpu_count() or 4) - 1)
                 
                 futures = {}
                 with ProcessPoolExecutor(max_workers=num_workers) as executor:
-                    for task in all_tasks:
+                    for b_task in batch_tasks:
                         if self.stop_event.is_set():
                             break
-                        fut = executor.submit(_process_single_file_task, task)
-                        futures[fut] = task
+                        fut = executor.submit(_process_batch_task, b_task)
+                        futures[fut] = b_task
 
                     for fut in as_completed(futures):
                         if self.stop_event.is_set():
@@ -392,9 +446,9 @@ class DicomProcessor:
                                     # Определяем тег лога
                                     if key in ('log_pixel_error', 'log_frame_save_error', 'log_save_error', 'log_critical_error'):
                                         tag = "error"
-                                    elif key in ('log_non_dicom', 'log_read_error', 'log_split_warning', 'log_files_not_found', 'log_stop_user'):
+                                    elif key in ('log_non_dicom', 'log_read_error', 'log_split_warning', 'log_files_not_found', 'log_stop_user', 'log_series_warning'):
                                         tag = "warning"
-                                    elif key in ('log_finished_success', 'log_split_success'):
+                                    elif key in ('log_finished_success', 'log_split_success', 'log_series_success'):
                                         tag = "success"
                                     else:
                                         tag = "info"
@@ -403,7 +457,9 @@ class DicomProcessor:
                             self.logger.log(self.loc("log_critical_error", str(e)), "error")
                             self.error_count += 1
 
-                        self.processed_count += 1
+                        # Обновляем прогресс на число файлов в этом батче
+                        b_task_files_count = len(futures[fut]['tasks'])
+                        self.processed_count += b_task_files_count
                         self.logger.update_progress(self.processed_count, total_files)
 
             end_time = datetime.now()
