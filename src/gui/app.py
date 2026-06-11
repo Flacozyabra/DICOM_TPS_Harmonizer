@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
     QGridLayout, QMessageBox, QApplication, QSplitter, QSizePolicy,
     QSlider, QStackedWidget, QComboBox
 )
-from PyQt6.QtGui import QIcon, QFont, QTextCursor, QPixmap, QBrush, QColor, QPainter, QPen, QImage
+from PyQt6.QtGui import QIcon, QFont, QTextCursor, QPixmap, QBrush, QColor, QPainter, QPen, QImage, QLinearGradient, QPolygon
 
 from src.core.config import ProcessingConfig
 from src.core.processor import DicomProcessor
@@ -277,6 +277,218 @@ class UpdateCheckerThread(QThread):
             except ValueError:
                 return (0, 0, 0)
         return parse_version(latest) > parse_version(current)
+
+
+class HUVerticalSlider(QWidget):
+    """Кастомный вертикальный слайдер с двумя ползунками для Window/Level (HU) в стиле Varian Eclipse."""
+    values_changed = pyqtSignal(float, float)  # lower_val, upper_val
+
+    def __init__(self, parent: QWidget = None) -> None:
+        super().__init__(parent)
+        self.min_hu = -1000.0
+        self.max_hu = 3000.0
+        self.lower_val = -160.0
+        self.upper_val = 240.0
+        
+        self.pad = 12
+        self.bar_width = 10
+        self.slider_size = 14
+        
+        self.dragging = None  # None, 'lower', 'upper', 'both'
+        self.drag_start_y = 0
+        self.drag_start_lower = 0.0
+        self.drag_start_upper = 0.0
+
+        self.setMinimumWidth(60)
+        self.setMouseTracking(True)
+
+    def set_values(self, lower: float, upper: float) -> None:
+        lower = max(self.min_hu, min(self.max_hu, lower))
+        upper = max(self.min_hu, min(self.max_hu, upper))
+        if lower > upper:
+            lower, upper = upper, lower
+        if upper - lower < 1.0:
+            upper = lower + 1.0
+        self.lower_val = lower
+        self.upper_val = upper
+        self.update()
+
+    def _hu_to_y(self, hu: float) -> int:
+        h = self.height()
+        active_h = h - 2 * self.pad
+        if active_h <= 0:
+            return self.pad
+        val_pct = (hu - self.min_hu) / (self.max_hu - self.min_hu)
+        return int(self.pad + active_h * (1.0 - val_pct))
+
+    def _y_to_hu(self, y: int) -> float:
+        h = self.height()
+        active_h = h - 2 * self.pad
+        if active_h <= 0:
+            return self.min_hu
+        val_pct = 1.0 - (y - self.pad) / active_h
+        val_pct = max(0.0, min(1.0, val_pct))
+        return self.min_hu + val_pct * (self.max_hu - self.min_hu)
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        h = self.height()
+        w = self.width()
+        cx = w // 2 - 12  # Сдвигаем шкалу чуть влево, чтобы подписи влезли справа
+
+        # 1. Рисуем фон шкалы
+        bar_rect = QRect(cx - self.bar_width // 2, self.pad, self.bar_width, h - 2 * self.pad)
+        painter.setPen(QPen(QColor("#374151"), 1))
+        painter.setBrush(QBrush(QColor("#111827")))
+        painter.drawRect(bar_rect)
+
+        # 2. Рисуем градиент внутри шкалы (от lower_val до upper_val)
+        y_lower = self._hu_to_y(self.lower_val)
+        y_upper = self._hu_to_y(self.upper_val)
+        
+        # Заливка ниже нижнего порога (черный цвет)
+        if y_lower < h - self.pad:
+            rect_below = QRect(bar_rect.x(), y_lower, bar_rect.width(), h - self.pad - y_lower)
+            painter.fillRect(rect_below, QColor("#000000"))
+
+        # Заливка выше верхнего порога (белый цвет)
+        if y_upper > self.pad:
+            rect_above = QRect(bar_rect.x(), self.pad, bar_rect.width(), y_upper - self.pad)
+            painter.fillRect(rect_above, QColor("#FFFFFF"))
+
+        # Градиент между порогами (от черного снизу до белого сверху)
+        if y_upper < y_lower:
+            grad = QLinearGradient(cx, y_lower, cx, y_upper)
+            grad.setColorAt(0.0, QColor("#000000"))
+            grad.setColorAt(1.0, QColor("#FFFFFF"))
+            rect_grad = QRect(bar_rect.x(), y_upper, bar_rect.width(), y_lower - y_upper)
+            painter.fillRect(rect_grad, grad)
+
+        # 3. Рисуем деления (риски)
+        painter.setPen(QPen(QColor("#4B5563"), 1))
+        font = painter.font()
+        font.setPointSize(8)
+        painter.setFont(font)
+        
+        for hu in range(int(self.min_hu), int(self.max_hu) + 1, 500):
+            y_tick = self._hu_to_y(hu)
+            painter.drawLine(cx - self.bar_width // 2 - 2, y_tick, cx - self.bar_width // 2, y_tick)
+            
+            # Подписи (каждые 1000 HU)
+            if hu % 1000 == 0:
+                painter.setPen(QPen(QColor("#9CA3AF"), 1))
+                painter.drawText(cx + self.bar_width // 2 + 5, y_tick + 3, str(hu))
+                painter.setPen(QPen(QColor("#4B5563"), 1))
+
+        # 4. Рисуем ползунки (треугольники слева от шкалы, указывающие вправо)
+        y_u = self._hu_to_y(self.upper_val)
+        y_l = self._hu_to_y(self.lower_val)
+
+        # Рисуем ползунок Upper
+        up_poly = [
+            QPoint(cx - self.bar_width // 2 - 12, y_u - 5),
+            QPoint(cx - self.bar_width // 2 - 2, y_u),
+            QPoint(cx - self.bar_width // 2 - 12, y_u + 5)
+        ]
+        painter.setPen(QPen(QColor("#60A5FA") if self.dragging == "upper" else QColor("#D1D5DB"), 1.5))
+        painter.setBrush(QBrush(QColor("#3B82F6") if self.dragging == "upper" else QColor("#4B5563")))
+        painter.drawPolygon(QPolygon(up_poly))
+
+        # Рисуем ползунок Lower
+        low_poly = [
+            QPoint(cx - self.bar_width // 2 - 12, y_l - 5),
+            QPoint(cx - self.bar_width // 2 - 2, y_l),
+            QPoint(cx - self.bar_width // 2 - 12, y_l + 5)
+        ]
+        painter.setPen(QPen(QColor("#60A5FA") if self.dragging == "lower" else QColor("#D1D5DB"), 1.5))
+        painter.setBrush(QBrush(QColor("#3B82F6") if self.dragging == "lower" else QColor("#4B5563")))
+        painter.drawPolygon(QPolygon(low_poly))
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            y = event.position().y()
+            w = self.width()
+            cx = w // 2 - 12
+            
+            y_u = self._hu_to_y(self.upper_val)
+            y_l = self._hu_to_y(self.lower_val)
+            
+            click_x = event.position().x()
+            in_slider_x = (cx - self.bar_width // 2 - 15 <= click_x <= cx - self.bar_width // 2)
+
+            if in_slider_x and abs(y - y_u) < 8:
+                self.dragging = 'upper'
+            elif in_slider_x and abs(y - y_l) < 8:
+                self.dragging = 'lower'
+            elif click_x >= cx - self.bar_width // 2 - 4 and click_x <= cx + self.bar_width // 2 + 4 and y_u <= y <= y_l:
+                self.dragging = 'both'
+                self.drag_start_y = y
+                self.drag_start_lower = self.lower_val
+                self.drag_start_upper = self.upper_val
+            else:
+                new_hu = self._y_to_hu(y)
+                if abs(new_hu - self.upper_val) < abs(new_hu - self.lower_val):
+                    self.dragging = 'upper'
+                    self.upper_val = max(self.lower_val + 10.0, new_hu)
+                else:
+                    self.dragging = 'lower'
+                    self.lower_val = min(self.upper_val - 10.0, new_hu)
+                self.values_changed.emit(self.lower_val, self.upper_val)
+            self.update()
+
+    def mouseMoveEvent(self, event) -> None:
+        y = event.position().y()
+        if self.dragging == 'upper':
+            new_hu = self._y_to_hu(y)
+            self.upper_val = max(self.lower_val + 10.0, min(self.max_hu, new_hu))
+            self.values_changed.emit(self.lower_val, self.upper_val)
+            self.update()
+        elif self.dragging == 'lower':
+            new_hu = self._y_to_hu(y)
+            self.lower_val = min(self.upper_val - 10.0, max(self.min_hu, new_hu))
+            self.values_changed.emit(self.lower_val, self.upper_val)
+            self.update()
+        elif self.dragging == 'both':
+            hu_start = self._y_to_hu(self.drag_start_y)
+            hu_current = self._y_to_hu(y)
+            delta_hu = hu_current - hu_start
+            
+            new_lower = self.drag_start_lower + delta_hu
+            new_upper = self.drag_start_upper + delta_hu
+            
+            if new_lower < self.min_hu:
+                diff = self.min_hu - new_lower
+                new_lower += diff
+                new_upper += diff
+            elif new_upper > self.max_hu:
+                diff = new_upper - self.max_hu
+                new_lower -= diff
+                new_upper -= diff
+                
+            self.lower_val = max(self.min_hu, min(self.max_hu, new_lower))
+            self.upper_val = max(self.min_hu, min(self.max_hu, new_upper))
+            self.values_changed.emit(self.lower_val, self.upper_val)
+            self.update()
+        else:
+            w = self.width()
+            cx = w // 2 - 12
+            y_u = self._hu_to_y(self.upper_val)
+            y_l = self._hu_to_y(self.lower_val)
+            click_x = event.position().x()
+            in_slider_x = (cx - self.bar_width // 2 - 15 <= click_x <= cx - self.bar_width // 2)
+            
+            if in_slider_x and (abs(y - y_u) < 8 or abs(y - y_l) < 8):
+                self.setCursor(Qt.CursorShape.SplitVertCursor)
+            elif click_x >= cx - self.bar_width // 2 and click_x <= cx + self.bar_width // 2 and y_u <= y <= y_l:
+                self.setCursor(Qt.CursorShape.SizeAllCursor)
+            else:
+                self.setCursor(Qt.CursorShape.ArrowCursor)
+
+    def mouseReleaseEvent(self, event) -> None:
+        self.dragging = None
+        self.update()
 
 
 class DicomViewerWidget(QWidget):
@@ -842,7 +1054,7 @@ class DicomViewerPanel(QWidget):
 
     def setup_hu_panel(self) -> None:
         self.hu_panel = QFrame(self)
-        self.hu_panel.setFixedWidth(200)
+        self.hu_panel.setFixedWidth(70)
         self.hu_panel.setStyleSheet("""
             QFrame {
                 background-color: #1F2937;
@@ -852,68 +1064,34 @@ class DicomViewerPanel(QWidget):
             QLabel {
                 border: none;
                 background: transparent;
-                color: #E5E7EB;
-            }
-            QSlider::groove:horizontal {
-                background: #111827;
-                height: 4px;
-                border-radius: 2px;
-            }
-            QSlider::handle:horizontal {
-                background: #10B981;
-                width: 16px;
-                margin-top: -6px;
-                margin-bottom: -6px;
-                border-radius: 8px;
-            }
-            QSlider::handle:horizontal:hover {
-                background: #34D399;
+                color: #EF4444;
+                font-size: 11px;
+                font-weight: bold;
             }
         """)
         panel_layout = QVBoxLayout(self.hu_panel)
-        panel_layout.setContentsMargins(12, 12, 12, 12)
-        panel_layout.setSpacing(12)
+        panel_layout.setContentsMargins(4, 10, 4, 10)
+        panel_layout.setSpacing(6)
 
-        # Заголовок
-        self.lbl_hu_title = QLabel("Параметры HU", self.hu_panel)
-        self.lbl_hu_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #FFFFFF;")
-        panel_layout.addWidget(self.lbl_hu_title)
+        self.lbl_upper_hu = QLabel("240 HU", self.hu_panel)
+        self.lbl_upper_hu.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        panel_layout.addWidget(self.lbl_upper_hu)
 
-        # Window Center (Level)
-        panel_layout.addSpacing(5)
-        self.lbl_wc_val = QLabel("Level: 40", self.hu_panel)
-        self.lbl_wc_val.setStyleSheet("font-size: 12px; font-weight: bold;")
-        panel_layout.addWidget(self.lbl_wc_val)
+        self.hu_slider = HUVerticalSlider(self.hu_panel)
+        self.hu_slider.values_changed.connect(self.on_vertical_slider_changed)
+        panel_layout.addWidget(self.hu_slider, stretch=1)
 
-        self.slider_wc = QSlider(Qt.Orientation.Horizontal, self.hu_panel)
-        self.slider_wc.setRange(-1000, 3000)
-        self.slider_wc.setValue(40)
-        self.slider_wc.valueChanged.connect(self.on_panel_wc_changed)
-        panel_layout.addWidget(self.slider_wc)
+        self.lbl_lower_hu = QLabel("-160 HU", self.hu_panel)
+        self.lbl_lower_hu.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        panel_layout.addWidget(self.lbl_lower_hu)
 
-        # Window Width
-        panel_layout.addSpacing(5)
-        self.lbl_ww_val = QLabel("Width: 400", self.hu_panel)
-        self.lbl_ww_val.setStyleSheet("font-size: 12px; font-weight: bold;")
-        panel_layout.addWidget(self.lbl_ww_val)
-
-        self.slider_ww = QSlider(Qt.Orientation.Horizontal, self.hu_panel)
-        self.slider_ww.setRange(1, 4000)
-        self.slider_ww.setValue(400)
-        self.slider_ww.valueChanged.connect(self.on_panel_ww_changed)
-        panel_layout.addWidget(self.slider_ww)
-
-        panel_layout.addStretch()
         self.hu_panel.hide()
 
-    def on_panel_wc_changed(self, value: int) -> None:
-        self.window_center = float(value)
-        self.lbl_wc_val.setText(self.parent_app.loc("hu_level", value) if hasattr(self.parent_app, "loc") else f"Level: {value}")
-        self.update_current_slice_pixels()
-
-    def on_panel_ww_changed(self, value: int) -> None:
-        self.window_width = float(value)
-        self.lbl_ww_val.setText(self.parent_app.loc("hu_width", value) if hasattr(self.parent_app, "loc") else f"Width: {value}")
+    def on_vertical_slider_changed(self, lower: float, upper: float) -> None:
+        self.window_width = upper - lower
+        self.window_center = (upper + lower) / 2.0
+        self.lbl_upper_hu.setText(f"{int(upper)} HU")
+        self.lbl_lower_hu.setText(f"{int(lower)} HU")
         self.update_current_slice_pixels()
 
     def retranslate_ui(self) -> None:
@@ -930,11 +1108,6 @@ class DicomViewerPanel(QWidget):
         self.btn_hu.setToolTip(self.parent_app.loc("tooltip_hu") if hasattr(self.parent_app, "loc") else "Настройка окна HU")
         self.btn_osd.setToolTip(self.parent_app.loc("tooltip_osd") if hasattr(self.parent_app, "loc") else "Показать/скрыть надписи")
         self.btn_close.setToolTip(self.parent_app.loc("tooltip_close_viewer") if hasattr(self.parent_app, "loc") else "Закрыть просмотр")
-
-        if hasattr(self, "hu_panel"):
-            self.lbl_hu_title.setText(self.parent_app.loc("hu_panel_title") if hasattr(self.parent_app, "loc") else "Параметры HU")
-            self.lbl_wc_val.setText(self.parent_app.loc("hu_level", int(self.slider_wc.value())) if hasattr(self.parent_app, "loc") else f"Level: {int(self.slider_wc.value())}")
-            self.lbl_ww_val.setText(self.parent_app.loc("hu_width", int(self.slider_ww.value())) if hasattr(self.parent_app, "loc") else f"Width: {int(self.slider_ww.value())}")
 
     def update_buttons_style(self) -> None:
         style_ruler_active = """
@@ -958,8 +1131,8 @@ class DicomViewerPanel(QWidget):
         """
         style_hu_active = """
             QPushButton {
-                background-color: #10B981;
-                border: 1px solid #34D399;
+                background-color: #3B82F6;
+                border: 1px solid #60A5FA;
                 border-radius: 4px;
                 padding: 0px;
                 min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px;
@@ -1223,21 +1396,17 @@ class DicomViewerPanel(QWidget):
     def on_window_changed(self, width: float, center: float) -> None:
         self.window_width = width
         self.window_center = center
-        if hasattr(self, "hu_panel"):
-            self.slider_wc.blockSignals(True)
-            self.slider_ww.blockSignals(True)
+        if hasattr(self, "hu_panel") and hasattr(self, "hu_slider"):
+            lower = center - width / 2.0
+            upper = center + width / 2.0
             
-            wc_val = max(-1000, min(int(center), 3000))
-            ww_val = max(1, min(int(width), 4000))
+            self.hu_slider.blockSignals(True)
+            self.hu_slider.set_values(lower, upper)
+            self.hu_slider.blockSignals(False)
             
-            self.slider_wc.setValue(wc_val)
-            self.slider_ww.setValue(ww_val)
+            self.lbl_upper_hu.setText(f"{int(upper)} HU")
+            self.lbl_lower_hu.setText(f"{int(lower)} HU")
             
-            self.lbl_wc_val.setText(self.parent_app.loc("hu_level", wc_val) if hasattr(self.parent_app, "loc") else f"Level: {wc_val}")
-            self.lbl_ww_val.setText(self.parent_app.loc("hu_width", ww_val) if hasattr(self.parent_app, "loc") else f"Width: {ww_val}")
-            
-            self.slider_wc.blockSignals(False)
-            self.slider_ww.blockSignals(False)
         self.update_current_slice_pixels()
 
     def update_current_slice_pixels(self) -> None:
