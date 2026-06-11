@@ -480,7 +480,7 @@ class HUVerticalSlider(QWidget):
             in_slider_x = (cx - self.bar_width // 2 - 15 <= click_x <= cx - self.bar_width // 2)
             
             if in_slider_x and (abs(y - y_u) < 8 or abs(y - y_l) < 8):
-                self.setCursor(Qt.CursorShape.SplitVertCursor)
+                self.setCursor(Qt.CursorShape.SplitVCursor)
             elif click_x >= cx - self.bar_width // 2 and click_x <= cx + self.bar_width // 2 and y_u <= y <= y_l:
                 self.setCursor(Qt.CursorShape.SizeAllCursor)
             else:
@@ -1410,6 +1410,14 @@ class DicomViewerPanel(QWidget):
         self.update_current_slice_pixels()
 
     def update_current_slice_pixels(self) -> None:
+        ds = self.viewer.current_dataset
+        if ds is not None:
+            pixmap = self.dicom_to_pixmap(ds, self.window_width, self.window_center)
+            if pixmap:
+                self.viewer.set_dicom_image(pixmap, ds)
+                self.viewer.set_window_params(self.window_width, self.window_center)
+            return
+
         if self.current_index < 0 or self.current_index >= len(self.sorted_files):
             return
         filepath = self.sorted_files[self.current_index]
