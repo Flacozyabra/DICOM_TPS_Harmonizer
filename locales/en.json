@@ -98,6 +98,7 @@
     "update_message": "A new version {} is available. Do you want to download it?",
     "dont_show_again": "Don't show again",
     "viewer_close": "Close Viewer",
+    "viewer_spacing": "Spacing: {:.1f} mm",
     "viewer_slice": "Slice: {} / {}",
     "viewer_no_pixels": "No pixel data",
     "preset_dicom": "Default (DICOM)",

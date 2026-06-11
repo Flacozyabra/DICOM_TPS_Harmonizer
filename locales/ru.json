@@ -98,6 +98,7 @@
     "update_message": "Доступна новая версия {}. Хотите скачать её?",
     "dont_show_again": "Не показывать больше",
     "viewer_close": "Закрыть просмотр",
+    "viewer_spacing": "Шаг: {:.1f} мм",
     "viewer_slice": "Срез: {} / {}",
     "viewer_no_pixels": "Нет пиксельных данных",
     "preset_dicom": "По умолчанию (DICOM)",

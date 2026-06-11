@@ -641,12 +641,37 @@ class DicomViewerWidget(QWidget):
                 else:
                     slice_info = f"Slice: {self.current_slice} / {self.total_slices}"
                 
+                spacing_text = ""
+                if self.current_dataset:
+                    spacing = getattr(self.current_dataset, "SpacingBetweenSlices", None)
+                    if spacing is None:
+                        spacing = getattr(self.current_dataset, "SliceThickness", None)
+                    if spacing is not None:
+                        try:
+                            spacing_val = float(spacing)
+                            if hasattr(self, "parent") and hasattr(self.parent(), "parent_app"):
+                                spacing_text = self.parent().parent_app.loc("viewer_spacing", spacing_val)
+                            else:
+                                spacing_text = f"Spacing: {spacing_val:.1f} mm"
+                        except (ValueError, TypeError):
+                            pass
+
                 metrics_r = painter.fontMetrics()
+                
+                # Рисуем номер среза
                 rect_slice = metrics_r.boundingRect(slice_info)
                 rect_slice.moveBottomRight(QPoint(self.width() - 15, self.height() - 15))
                 painter.fillRect(rect_slice.adjusted(-4, -2, 4, 2), QColor(0, 0, 0, 150))
                 painter.setPen(QColor("#E5E7EB"))
-                painter.drawText(rect_slice, Qt.AlignmentFlag.AlignRight, slice_info)
+                painter.drawText(rect_slice, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, slice_info)
+                
+                # Рисуем шаг среза над номером среза
+                if spacing_text:
+                    rect_spacing = metrics_r.boundingRect(spacing_text)
+                    rect_spacing.moveBottomRight(QPoint(self.width() - 15, rect_slice.top() - 8))
+                    painter.fillRect(rect_spacing.adjusted(-4, -2, 4, 2), QColor(0, 0, 0, 150))
+                    painter.setPen(QColor("#E5E7EB"))
+                    painter.drawText(rect_spacing, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, spacing_text)
 
     def draw_tick(self, painter: QPainter, pt1: QPointF, pt2: QPointF) -> None:
         dx = pt2.x() - pt1.x()
