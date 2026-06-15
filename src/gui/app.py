@@ -1472,27 +1472,8 @@ class DicomSplitterApp(QMainWindow):
     def get_selected_files_or_autoscan(self) -> list:
         selected_files = self.get_selected_files()
         if not selected_files and self.tree_widget.topLevelItemCount() == 0:
-            input_path = self.input_entry.text()
-            if not input_path or "Введите путь" in input_path or "Enter path" in input_path:
-                return []
-            path = Path(input_path)
-            if not path.exists():
-                return []
-            
-            temp_config = ProcessingConfig(
-                new_uids=False, split_multiframe=False, clean_tags=False,
-                default_tags=False, explicit_vr=False, exclude_reports=False,
-                split_series=self.cb_split_series.isChecked()
-            )
-            logger = QtLogger(self.bridge)
-            processor = DicomProcessor(path, self.output_entry.text(), temp_config, logger, threading.Event(), lang=self.current_lang)
-            try:
-                tree_data = processor.scan_input_directory()
-                self.populate_tree(tree_data)
-                self.update_selection_label()
-                selected_files = self.get_selected_files()
-            except Exception:
-                pass
+            self.run_input_scan()
+            selected_files = self.get_selected_files()
         return selected_files
 
     # Главный поток обработки
