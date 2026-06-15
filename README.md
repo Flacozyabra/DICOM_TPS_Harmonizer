@@ -22,11 +22,11 @@
 
 ## Русский
 
-**DICOM TPS Harmonizer** — это приложение с графическим интерфейсом (GUI) для разделения мультифреймовых DICOM-файлов на одиночные срезы и оптимизации их метаданных под планирующие системы (TPS) **Varian Aria** и **Elekta Monaco**.
+**DICOM TPS Harmonizer** — это приложение с графическим интерфейсом (GUI) для разделения мультифреймовых DICOM-файлов на одиночные срезы и оптимизации их метаданных под планирующие системы (TPS) **Varian Eclipse** и **Elekta Monaco**.
 
 ### Основные возможности
 * **Разделение мультифреймов:** Преобразует файлы Enhanced DICOM в классические single-frame срезы.
-* **Совместимость с TPS:** Очищает приватные теги, генерирует новые UID и приводит файлы к стандарту, необходимому для Aria и Monaco.
+* **Совместимость с TPS:** Очищает приватные теги, генерирует новые UID и приводит файлы к стандарту, необходимому для Eclipse и Monaco.
 * **Автоматическое исправление (Siemens EOF Fix):** На лету восстанавливает поврежденные файлы, у которых отсутствует концевой маркер последовательности пикселей.
 * **Удобная структура папок:** Группирует результаты в виде:  
   `Dicom_output / <Имя_Пациента>_<ID_Пациента> / <Модальность_Описание_Серии> / slice_XXXX.dcm`
@@ -52,11 +52,11 @@
 
 ## English
 
-**DICOM TPS Harmonizer** is a desktop GUI application designed to split multi-frame DICOM files into classic single-frame slices and optimize their metadata for **Varian Aria** and **Elekta Monaco** Treatment Planning Systems (TPS).
+**DICOM TPS Harmonizer** is a desktop GUI application designed to split multi-frame DICOM files into classic single-frame slices and optimize their metadata for **Varian Eclipse** and **Elekta Monaco** Treatment Planning Systems (TPS).
 
 ### Key Features
 * **Multi-frame Splitting:** Converts Enhanced DICOM datasets into standard single-frame slices.
-* **TPS Compatibility:** Filters incompatible private tags, generates clean UIDs, and standardizes files for Aria & Monaco imports.
+* **TPS Compatibility:** Filters incompatible private tags, generates clean UIDs, and standardizes files for Eclipse & Monaco imports.
 * **On-the-fly Recovery (Siemens EOF Fix):** Automatically fixes and parses truncated files lacking sequence delimiters.
 * **Clear Directory Hierarchy:** Outputs structured patient datasets:  
   `Dicom_output / <PatientName>_<PatientID> / <Modality_SeriesDescription> / slice_XXXX.dcm`
