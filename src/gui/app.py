@@ -201,7 +201,7 @@ class CustomQuestionDialog(QDialog):
         lbl = QLabel(message, self)
         lbl.setWordWrap(True)
         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl.setStyleSheet("font-size: 13px; color: #E5E7EB;")
+        lbl.setStyleSheet("font-size: 13px;")
         layout.addWidget(lbl)
 
         btn_layout = QHBoxLayout()
@@ -253,7 +253,7 @@ class UpdateDialog(QDialog):
         lbl = QLabel(message, self)
         lbl.setWordWrap(True)
         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl.setStyleSheet("font-size: 13px; color: #E5E7EB;")
+        lbl.setStyleSheet("font-size: 13px;")
         layout.addWidget(lbl)
 
         btn_layout = QHBoxLayout()
@@ -1645,7 +1645,7 @@ class PatientEditDialog(QDialog):
         lbl_msg = QLabel(parent.loc("dialog_patient_message"), self)
         lbl_msg.setWordWrap(True)
         lbl_msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_msg.setStyleSheet("font-size: 12px; color: #E5E7EB;")
+        lbl_msg.setStyleSheet("font-size: 12px;")
         layout.addWidget(lbl_msg)
 
         form_layout = QGridLayout()
@@ -1710,7 +1710,7 @@ class ScanProgressDialog(QDialog):
 
         self.lbl_status = QLabel(parent.loc("dialog_scan_finding"), self)
         self.lbl_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_status.setStyleSheet("font-size: 13px; color: #E5E7EB;")
+        self.lbl_status.setStyleSheet("font-size: 13px;")
         layout.addWidget(self.lbl_status)
 
         self.progress_bar = QProgressBar(self)
