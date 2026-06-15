@@ -1489,6 +1489,7 @@ class DicomSplitterApp(QMainWindow):
             try:
                 tree_data = processor.scan_input_directory()
                 self.populate_tree(tree_data)
+                self.update_selection_label()
                 selected_files = self.get_selected_files()
             except Exception:
                 pass
