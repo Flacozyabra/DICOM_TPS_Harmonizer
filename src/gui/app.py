@@ -528,6 +528,11 @@ class DicomSplitterApp(QMainWindow):
         self.btn_open_in.setToolTip(self.loc("tooltip_open_input"))
         self.btn_open_out.setToolTip(self.loc("tooltip_open_output"))
 
+        if hasattr(self, "viewer_panel"):
+            self.viewer_panel.retranslate_ui()
+            if hasattr(self.viewer_panel, "viewer"):
+                self.viewer_panel.viewer.update()
+
         self.update_selection_label()
 
         if self.is_processing:
