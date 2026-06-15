@@ -15,6 +15,7 @@ from pydicom.uid import generate_uid
 from src.core.config import ProcessingConfig
 from src.core.converter import (
     clean_and_build_dataset,
+    clean_and_build_dataset_inplace,
     copy_geometry_and_rescale,
     save_dicom_file,
 )
@@ -82,7 +83,6 @@ def _process_batch_task(batch_task: dict) -> dict:
                 results['no_pixel_count'] += 1
                 continue
                 
-            pixel_array = ds_full.pixel_array
         except Exception as e:
             import traceback
             tb = traceback.format_exc()
@@ -96,6 +96,18 @@ def _process_batch_task(batch_task: dict) -> dict:
         is_multiframe = hasattr(ds_full, 'NumberOfFrames') and int(ds_full.NumberOfFrames) > 1
 
         if is_multiframe and config.split_multiframe:
+            try:
+                pixel_array = ds_full.pixel_array
+            except Exception as e:
+                import traceback
+                tb = traceback.format_exc()
+                results['status'] = 'error'
+                results['error_count'] += 1
+                series_errors += 1
+                results['logs'].append(('log_pixel_error', filename, str(e)))
+                results['logs'].append(('traceback', tb))
+                continue
+
             n_frames = int(ds_full.NumberOfFrames)
             results['logs'].append(('log_split_multiframe', filename, n_frames))
 
@@ -155,9 +167,9 @@ def _process_batch_task(batch_task: dict) -> dict:
 
         else:
             try:
-                cleaned_ds = clean_and_build_dataset(
+                # Оптимизированный in-place путь для single-frame файлов
+                cleaned_ds = clean_and_build_dataset_inplace(
                     src_ds=ds_full,
-                    pixel_data=pixel_array,
                     instance_number=instance_number,
                     study_uid=study_uid_mapped,
                     series_uid=series_uid_mapped,

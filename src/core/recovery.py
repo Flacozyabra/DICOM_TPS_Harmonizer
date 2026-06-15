@@ -27,9 +27,6 @@ def safe_dcmread(file_path: Path, stop_before_pixels: bool = False) -> Dataset:
         if not hasattr(ds, 'SOPClassUID') or len(ds) == 0:
             raise pydicom.errors.InvalidDicomError("Missing SOPClassUID or empty dataset")
             
-        if not stop_before_pixels:
-            ds.decompress()
-            
         return ds
         
     except (pydicom.errors.InvalidDicomError, TypeError, KeyError) as e:
@@ -45,9 +42,6 @@ def safe_dcmread(file_path: Path, stop_before_pixels: bool = False) -> Dataset:
             
             if not hasattr(ds, 'SOPClassUID') or len(ds) == 0:
                 raise pydicom.errors.InvalidDicomError("Still missing SOPClassUID after fix")
-                
-            if not stop_before_pixels:
-                ds.decompress()
                 
             return ds
             

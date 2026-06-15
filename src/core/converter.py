@@ -4,8 +4,17 @@ import numpy as np
 import pydicom
 from pydicom.dataset import Dataset, FileDataset
 from pydicom.uid import generate_uid, ExplicitVRLittleEndian
+from pydicom.tag import Tag
 from src.core.config import ProcessingConfig
 from src.utils.helpers import get_seq_attr
+
+FORBIDDEN_TAGS_STR = {
+    'PixelData', 'NumberOfFrames', 'PerFrameFunctionalGroupsSequence', 
+    'SharedFunctionalGroupsSequence', 'SOPClassUID', 'SOPInstanceUID', 
+    'SeriesInstanceUID', 'StudyInstanceUID', 'InstanceNumber', 'Rows', 'Columns',
+    'FunctionalGroupPointer', 'SelectorSequencePointer'
+}
+FORBIDDEN_TAGS_IDS = {Tag(t) for t in FORBIDDEN_TAGS_STR}
 
 def clean_and_build_dataset(
     src_ds: Dataset,
@@ -34,30 +43,16 @@ def clean_and_build_dataset(
     """
     new_ds = Dataset()
 
-    # Теги, которые запрещено копировать напрямую в сингл-фрейм
-    forbidden_tags = {
-        'PixelData', 'NumberOfFrames', 'PerFrameFunctionalGroupsSequence', 
-        'SharedFunctionalGroupsSequence', 'SOPClassUID', 'SOPInstanceUID', 
-        'SeriesInstanceUID', 'StudyInstanceUID', 'InstanceNumber', 'Rows', 'Columns',
-        'FunctionalGroupPointer', 'SelectorSequencePointer'
-    }
-
     if config.clean_tags:
-        # Копируем только безопасные стандартные теги
+        # Быстрое копирование безопасных стандартных тегов по целочисленным ID
         for element in src_ds:
-            if element.keyword and element.keyword not in forbidden_tags and not element.is_private:
-                try:
-                    setattr(new_ds, element.keyword, element.value)
-                except AttributeError:
-                    pass
+            if element.tag not in FORBIDDEN_TAGS_IDS and not element.is_private and element.keyword:
+                new_ds[element.tag] = element
     else:
         # Копируем всё, кроме структурных тегов мультифрейма и пикселей
         for element in src_ds:
-            if element.keyword and element.keyword not in forbidden_tags:
-                try:
-                    setattr(new_ds, element.keyword, element.value)
-                except AttributeError:
-                    pass
+            if element.tag not in FORBIDDEN_TAGS_IDS:
+                new_ds[element.tag] = element
 
     # Идентификаторы и метаданные
     new_ds.SpecificCharacterSet = 'ISO_IR 100'
@@ -136,6 +131,105 @@ def clean_and_build_dataset(
         new_ds.PixelData = pixel_data.astype(np.uint16).tobytes()
 
     return new_ds
+
+
+def clean_and_build_dataset_inplace(
+    src_ds: Dataset,
+    instance_number: int,
+    study_uid: str,
+    series_uid: str,
+    sop_class: str,
+    for_uid: str,
+    config: ProcessingConfig
+) -> Dataset:
+    """Модифицирует исходный Dataset на месте (in-place) для ускорения обработки.
+
+    Исключает медленное копирование тегов и извлечение pixel_array (если BitsAllocated == 16).
+    """
+    # Удаляем запрещенные, приватные и некорректные теги
+    if config.clean_tags:
+        for tag in list(src_ds.keys()):
+            element = src_ds[tag]
+            if tag in FORBIDDEN_TAGS_IDS or tag.is_private or not element.keyword:
+                del src_ds[tag]
+    else:
+        for tag in list(src_ds.keys()):
+            if tag in FORBIDDEN_TAGS_IDS:
+                del src_ds[tag]
+
+    # Идентификаторы и метаданные
+    src_ds.SpecificCharacterSet = 'ISO_IR 100'
+    src_ds.SOPClassUID = sop_class
+    src_ds.SOPInstanceUID = generate_uid()
+    src_ds.StudyInstanceUID = study_uid
+    src_ds.SeriesInstanceUID = series_uid
+    src_ds.InstanceNumber = int(instance_number)
+    src_ds.FrameOfReferenceUID = for_uid
+
+    if not hasattr(src_ds, 'ImageType') or not src_ds.ImageType:
+        src_ds.ImageType = ['ORIGINAL', 'PRIMARY']
+
+    # Принудительное приведение к 16-битному формату для Monaco TPS
+    need_pixel_conversion = False
+    bits_allocated = getattr(src_ds, 'BitsAllocated', 16)
+    if bits_allocated != 16:
+        src_ds.BitsAllocated = 16
+        src_ds.BitsStored = 16
+        src_ds.HighBit = 15
+        need_pixel_conversion = True
+
+    # Обязательные теги по умолчанию (если включено)
+    if config.default_tags:
+        if not hasattr(src_ds, 'AccessionNumber') or not src_ds.AccessionNumber:
+            src_ds.AccessionNumber = "000000"
+        if not hasattr(src_ds, 'StudyID') or not src_ds.StudyID:
+            src_ds.StudyID = "1"
+        if not hasattr(src_ds, 'ReferringPhysicianName') or not src_ds.ReferringPhysicianName:
+            src_ds.ReferringPhysicianName = "UNKNOWN"
+        if not hasattr(src_ds, 'Manufacturer') or not src_ds.Manufacturer:
+            src_ds.Manufacturer = 'UNKNOWN'
+        if not hasattr(src_ds, 'PatientID') or not src_ds.PatientID:
+            src_ds.PatientID = "UNKNOWN"
+        if not hasattr(src_ds, 'PatientName') or not src_ds.PatientName:
+            src_ds.PatientName = "UNKNOWN"
+        if not hasattr(src_ds, 'PatientBirthDate'):
+            src_ds.PatientBirthDate = ''
+        if not hasattr(src_ds, 'PatientSex') or not src_ds.PatientSex:
+            src_ds.PatientSex = 'O'
+
+        modality = getattr(src_ds, 'Modality', None)
+        if modality == 'MR':
+            if not hasattr(src_ds, 'MRAcquisitionType') or not src_ds.MRAcquisitionType:
+                src_ds.MRAcquisitionType = '2D'
+            if not hasattr(src_ds, 'ScanningSequence') or not src_ds.ScanningSequence:
+                src_ds.ScanningSequence = 'SE'
+            if not hasattr(src_ds, 'SequenceVariant') or not src_ds.SequenceVariant:
+                src_ds.SequenceVariant = 'NONE'
+            if not hasattr(src_ds, 'ScanOptions') or not src_ds.ScanOptions:
+                src_ds.ScanOptions = 'NONE'
+            if not hasattr(src_ds, 'EchoTime') or src_ds.EchoTime is None or src_ds.EchoTime == "":
+                src_ds.EchoTime = 0.0
+            if not hasattr(src_ds, 'RepetitionTime') or src_ds.RepetitionTime is None or src_ds.RepetitionTime == "":
+                src_ds.RepetitionTime = 0.0
+            if not hasattr(src_ds, 'MagneticFieldStrength') or src_ds.MagneticFieldStrength is None or src_ds.MagneticFieldStrength == "":
+                src_ds.MagneticFieldStrength = 1.5
+            if not hasattr(src_ds, 'AcquisitionNumber') or src_ds.AcquisitionNumber is None or src_ds.AcquisitionNumber == "":
+                src_ds.AcquisitionNumber = 1
+
+        elif modality == 'CT':
+            src_ds.PatientSupportAngle = 0.0
+            src_ds.TableTopPitchAngle = 0.0
+            src_ds.TableTopRollAngle = 0.0
+
+    # Выполняем конвертацию пикселей только в случае, если глубина исходного файла не 16 бит
+    if need_pixel_conversion and any(tag in src_ds for tag in ['PixelData', 'FloatPixelData', 'DoubleFloatPixelData']):
+        pixel_array = src_ds.pixel_array
+        if getattr(src_ds, 'PixelRepresentation', 0) == 1:
+            src_ds.PixelData = pixel_array.astype(np.int16).tobytes()
+        else:
+            src_ds.PixelData = pixel_array.astype(np.uint16).tobytes()
+
+    return src_ds
 
 def copy_geometry_and_rescale(
     src_ds: Dataset,
