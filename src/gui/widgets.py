@@ -701,9 +701,9 @@ class DicomViewerWidget(QWidget):
                     
                     spacing_text = ""
                     if self.current_dataset:
-                        spacing = getattr(self.current_dataset, "SpacingBetweenSlices", None)
+                        spacing = getattr(self.current_dataset, "SliceThickness", None)
                         if spacing is None:
-                            spacing = getattr(self.current_dataset, "SliceThickness", None)
+                            spacing = getattr(self.current_dataset, "SpacingBetweenSlices", None)
                         if spacing is not None:
                             try:
                                 spacing_val = float(spacing)
