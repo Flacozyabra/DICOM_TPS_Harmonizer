@@ -1,5 +1,6 @@
 {
     "title": "DICOM TPS Harmonizer v1.1.0",
+    "title_label": "DICOM TPS Harmonizer",
     "input_folder": "Input folder:",
     "output_folder": "Output folder:",
     "placeholder_input": "Enter path for Dicom_input folder",
@@ -114,7 +115,7 @@
     "hu_level": "Level: {}",
     "hu_width": "Width: {}",
     "theme_dark": "Dark",
-    "theme_light": "Light",
+    "theme_light": "Slate",
     "theme_red": "Red",
     "theme_sunset": "Sunset",
     "theme_cyber": "Cyber",

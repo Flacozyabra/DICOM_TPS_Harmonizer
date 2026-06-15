@@ -1,5 +1,6 @@
 {
     "title": "DICOM TPS Harmonizer v1.1.0",
+    "title_label": "DICOM TPS Harmonizer",
     "input_folder": "Папка ввода:",
     "output_folder": "Папка вывода:",
     "placeholder_input": "Введите путь для папки Dicom_input",
@@ -114,7 +115,7 @@
     "hu_level": "Уровень: {}",
     "hu_width": "Ширина: {}",
     "theme_dark": "Темная",
-    "theme_light": "Светлая",
+    "theme_light": "Грифельная",
     "theme_red": "Красная",
     "theme_sunset": "Закат",
     "theme_cyber": "Кибер",

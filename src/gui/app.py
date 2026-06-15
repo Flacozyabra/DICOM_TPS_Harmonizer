@@ -1795,25 +1795,25 @@ class DicomSplitterApp(QMainWindow):
                 "SPLITTER_COLOR": "#2D2D2D"
             },
             "light": {
-                "MAIN_BG": "#F3F4F6",
-                "PANEL_BG": "#FFFFFF",
-                "TEXT_COLOR": "#374151",
-                "TEXT_LIGHT": "#111827",
-                "TEXT_MUTED": "#6B7280",
-                "BORDER_COLOR": "#D1D5DB",
-                "BORDER_COLOR_ALT": "#D1D5DB",
-                "BUTTON_BG": "#E5E7EB",
-                "BUTTON_HOVER_BG": "#D1D5DB",
-                "BUTTON_PRESSED_BG": "#9CA3AF",
-                "ACCENT_COLOR": "#2563EB",
-                "ACCENT_COLOR_DARK": "#3B82F6",
-                "ACCENT_COLOR_DEEP": "#1D4ED8",
-                "PROGRESS_BG": "#E5E7EB",
-                "PROGRESS_BORDER": "#D1D5DB",
-                "GRADIENT_START": "#3B82F6",
-                "GRADIENT_END": "#1D4ED8",
-                "ARROW_RIGHT_PATH": "arrow_right_dark.png",
-                "SPLITTER_COLOR": "#9CA3AF"
+                "MAIN_BG": "#192530",
+                "PANEL_BG": "#253745",
+                "TEXT_COLOR": "#CCD0CF",
+                "TEXT_LIGHT": "#FFFFFF",
+                "TEXT_MUTED": "#9BA8AB",
+                "BORDER_COLOR": "#354A5B",
+                "BORDER_COLOR_ALT": "#4A5C6A",
+                "BUTTON_BG": "#354A5B",
+                "BUTTON_HOVER_BG": "#4A5C6A",
+                "BUTTON_PRESSED_BG": "#253745",
+                "ACCENT_COLOR": "#9BA8AB",
+                "ACCENT_COLOR_DARK": "#9BA8AB",
+                "ACCENT_COLOR_DEEP": "#4A5C6A",
+                "PROGRESS_BG": "#192530",
+                "PROGRESS_BORDER": "#354A5B",
+                "GRADIENT_START": "#4A5C6A",
+                "GRADIENT_END": "#9BA8AB",
+                "ARROW_RIGHT_PATH": "arrow_right.png",
+                "SPLITTER_COLOR": "#354A5B"
             },
             "red": {
                 "MAIN_BG": "#1C0D11",
@@ -1822,10 +1822,10 @@ class DicomSplitterApp(QMainWindow):
                 "TEXT_LIGHT": "#FFFFFF",
                 "TEXT_MUTED": "#D4A3A9",
                 "BORDER_COLOR": "#4E232E",
-                "BORDER_COLOR_ALT": "#6E3241",
-                "BUTTON_BG": "#451E28",
-                "BUTTON_HOVER_BG": "#5C2835",
-                "BUTTON_PRESSED_BG": "#33161E",
+                "BORDER_COLOR_ALT": "#8A3B4E",
+                "BUTTON_BG": "#5E2633",
+                "BUTTON_HOVER_BG": "#7B3143",
+                "BUTTON_PRESSED_BG": "#3F1922",
                 "ACCENT_COLOR": "#E11D48",
                 "ACCENT_COLOR_DARK": "#BE123C",
                 "ACCENT_COLOR_DEEP": "#9F1239",
@@ -1843,10 +1843,10 @@ class DicomSplitterApp(QMainWindow):
                 "TEXT_LIGHT": "#FFA586",
                 "TEXT_MUTED": "#8A9BB4",
                 "BORDER_COLOR": "#384358",
-                "BORDER_COLOR_ALT": "#384358",
-                "BUTTON_BG": "#2E3C56",
-                "BUTTON_HOVER_BG": "#3B4E6F",
-                "BUTTON_PRESSED_BG": "#1B263B",
+                "BORDER_COLOR_ALT": "#5871A2",
+                "BUTTON_BG": "#3C4E70",
+                "BUTTON_HOVER_BG": "#4D638E",
+                "BUTTON_PRESSED_BG": "#2A374F",
                 "ACCENT_COLOR": "#B51A2B",
                 "ACCENT_COLOR_DARK": "#9A1624",
                 "ACCENT_COLOR_DEEP": "#541A2E",
@@ -2176,7 +2176,7 @@ class DicomSplitterApp(QMainWindow):
 
     def update_locale_texts(self) -> None:
         self.setWindowTitle(self.loc("title"))
-        self.title_label.setText(self.loc("title"))
+        self.title_label.setText(self.loc("title_label"))
         self.input_label.setText(self.loc("input_folder"))
         self.output_label.setText(self.loc("output_folder"))
         self.btn_browse_in.setText(self.loc("browse"))
