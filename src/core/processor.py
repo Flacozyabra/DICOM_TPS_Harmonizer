@@ -520,6 +520,10 @@ class DicomProcessor:
         if segment_idx > 0:
             series_desc = f"{series_desc}_Seg{segment_idx}"
 
+        # Извлекаем SeriesNumber для предотвращения дублирования имен папок разных серий
+        series_num = getattr(first_ds, 'SeriesNumber', None)
+        series_num_str = make_safe_filename(str(series_num)).strip() if series_num is not None else ""
+
         # Проверка на исключение служебных серий до создания папок
         if self.config.exclude_reports:
             series_desc_lower = series_desc.lower()
@@ -538,7 +542,12 @@ class DicomProcessor:
         patient_name = make_safe_filename(pat_name)
         patient_id = make_safe_filename(pat_id)
         patient_folder = f"{patient_name}_{patient_id}"
-        series_folder = f"{modality}_{series_desc}"
+        
+        if series_num_str:
+            series_folder = f"{modality}_{series_num_str}_{series_desc}"
+        else:
+            series_folder = f"{modality}_{series_desc}"
+            
         dest_dir = self.output_dir / patient_folder / series_folder
         dest_dir.mkdir(parents=True, exist_ok=True)
 
