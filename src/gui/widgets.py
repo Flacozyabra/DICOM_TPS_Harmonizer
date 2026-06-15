@@ -563,8 +563,8 @@ class DicomViewerWidget(QWidget):
                 dx = (x2 - x1) * col_spacing
                 dy = (y2 - y1) * row_spacing
                 dist_mm = math.sqrt(dx * dx + dy * dy)
-
-                text_dist = f"{dist_mm:.1f} мм"
+                unit = self.parent().parent_app.loc("mm") if hasattr(self, "parent") and hasattr(self.parent(), "parent_app") else "mm"
+                text_dist = f"{dist_mm:.1f} {unit}"
                 mid_x = (self.start_pos.x() + self.current_pos.x()) / 2
                 mid_y = (self.start_pos.y() + self.current_pos.y()) / 2
 
