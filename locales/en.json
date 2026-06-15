@@ -118,6 +118,6 @@
     "theme_red": "Red",
     "theme_sunset": "Sunset",
     "theme_cyber": "Cyber",
-    "log_series_success": "[{}] {} ({}) | {} | {} -> successfully saved {} slices",
-    "log_series_warning": "[{}] {} ({}) | {} | {} -> saved {} slices, {} errors"
+    "log_series_success": "[{}] {} ({}) | {} -> successfully saved {} slices",
+    "log_series_warning": "[{}] {} ({}) | {} -> saved {} slices, {} errors"
 }

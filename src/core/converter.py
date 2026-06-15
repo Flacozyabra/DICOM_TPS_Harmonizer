@@ -16,6 +16,15 @@ FORBIDDEN_TAGS_STR = {
 }
 FORBIDDEN_TAGS_IDS = {Tag(t) for t in FORBIDDEN_TAGS_STR}
 
+FORBIDDEN_TAGS_INPLACE_STR = {
+    'NumberOfFrames', 'PerFrameFunctionalGroupsSequence', 
+    'SharedFunctionalGroupsSequence', 'SOPClassUID', 'SOPInstanceUID', 
+    'SeriesInstanceUID', 'StudyInstanceUID', 'InstanceNumber',
+    'FunctionalGroupPointer', 'SelectorSequencePointer'
+}
+FORBIDDEN_TAGS_INPLACE_IDS = {Tag(t) for t in FORBIDDEN_TAGS_INPLACE_STR}
+
+
 def clean_and_build_dataset(
     src_ds: Dataset,
     pixel_data: np.ndarray,
@@ -150,12 +159,13 @@ def clean_and_build_dataset_inplace(
     if config.clean_tags:
         for tag in list(src_ds.keys()):
             element = src_ds[tag]
-            if tag in FORBIDDEN_TAGS_IDS or tag.is_private or not element.keyword:
+            if tag in FORBIDDEN_TAGS_INPLACE_IDS or tag.is_private or not element.keyword:
                 del src_ds[tag]
     else:
         for tag in list(src_ds.keys()):
-            if tag in FORBIDDEN_TAGS_IDS:
+            if tag in FORBIDDEN_TAGS_INPLACE_IDS:
                 del src_ds[tag]
+
 
     # Идентификаторы и метаданные
     src_ds.SpecificCharacterSet = 'ISO_IR 100'
