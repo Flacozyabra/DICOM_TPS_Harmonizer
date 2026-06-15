@@ -26,6 +26,7 @@ from src.utils.logger import BaseLogger
 from src.gui.threads import UpdateCheckerThread
 from src.gui.dialogs import CustomQuestionDialog, UpdateDialog, PatientEditDialog, ScanProgressDialog
 from src.gui.widgets import LanguageSwitch, HUVerticalSlider, DicomViewerWidget, DicomViewerPanel
+from src.gui.styles import set_dark_titlebar
 
 
 
