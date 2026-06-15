@@ -52,7 +52,7 @@
 
 ## English
 
-**DICOM TPS Harmonizer** is a desktop GUI application designed to split multi-frame DICOM files into classic single-frame slices and optimize their metadata for **Varian Eclipse** and **Elekta Monaco** Treatment Planning Systems (TPS).
+**DICOM TPS Harmonizer** is a desktop application designed to split multi-frame DICOM files into classic single-frame slices and optimize their metadata for **Varian Eclipse** and **Elekta Monaco** Treatment Planning Systems (TPS).
 
 ### Key Features
 * **Multi-frame Splitting:** Converts Enhanced DICOM datasets into standard single-frame slices.
@@ -63,11 +63,11 @@
 * **Interactive DICOM Viewer:** Integrated series visualization featuring Zoom, Pan, measurement ruler, and HU window Level/Width sliders.
 * **Drag-and-Drop Support:** Drag folders or files directly into path input fields.
 * **UI Customization:** Choose between 5 built-in color themes ("Dark", "Light", "Red", "Sunset", and "Cyber") with native Windows DWM title bar adaptation.
-* **Modern GUI:** Sleek interface built with `PyQt6`, featuring automatic patient explorer resizing and real-time color logging.
+* **GUI:** Interface built with `PyQt6`, featuring automatic patient explorer resizing and real-time color logging.
 * **Multi-language support:** Built-in Russian and English localizations for both GUI and execution logs.
 
 ### Using pre-built binaries
-You can download the compiled standalone `.exe` for Windows from the [Releases](https://github.com/Flacozyabra/DICOM_TPS_Harmonizer/releases) section. No Python installation or manual dependencies configuration is required.
+You can download the compiled standalone `.exe` for Windows from the [Releases](https://github.com/Flacozyabra/DICOM_TPS_Harmonizer/releases) section. No Python installation or dependencies are required, but MS VC++ Runtime (Visual Studio 2015-2022) must be installed.
 
 ### Quick Start from source (Windows)
 Double-click [run.bat](run.bat) in the project folder. It will configure the virtual environment and start the application automatically.
