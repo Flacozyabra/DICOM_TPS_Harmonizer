@@ -1,5 +1,6 @@
 import io
 from pathlib import Path
+import struct
 import pydicom
 from pydicom.dataset import Dataset
 
@@ -27,9 +28,15 @@ def safe_dcmread(file_path: Path, stop_before_pixels: bool = False) -> Dataset:
         if not hasattr(ds, 'SOPClassUID') or len(ds) == 0:
             raise pydicom.errors.InvalidDicomError("Missing SOPClassUID or empty dataset")
             
+        if not stop_before_pixels and any(tag in ds for tag in ['PixelData', 'FloatPixelData', 'DoubleFloatPixelData']):
+            try:
+                ds.decompress()
+            except AttributeError:
+                pass
+            
         return ds
         
-    except (pydicom.errors.InvalidDicomError, TypeError, KeyError) as e:
+    except (pydicom.errors.InvalidDicomError, TypeError, KeyError, ValueError, EOFError, struct.error) as e:
         # Если стандартное чтение не удалось, пробуем применить Siemens EOF Fix
         try:
             with open(file_path, 'rb') as fp:
@@ -43,6 +50,12 @@ def safe_dcmread(file_path: Path, stop_before_pixels: bool = False) -> Dataset:
             if not hasattr(ds, 'SOPClassUID') or len(ds) == 0:
                 raise pydicom.errors.InvalidDicomError("Still missing SOPClassUID after fix")
                 
+            if not stop_before_pixels and any(tag in ds for tag in ['PixelData', 'FloatPixelData', 'DoubleFloatPixelData']):
+                try:
+                    ds.decompress()
+                except AttributeError:
+                    pass
+                
             return ds
             
         except Exception as fix_err:
@@ -50,3 +63,4 @@ def safe_dcmread(file_path: Path, stop_before_pixels: bool = False) -> Dataset:
                 f"Не удалось прочитать или восстановить файл DICOM: {file_path.name}. "
                 f"Ошибка: {fix_err}"
             ) from e
+
