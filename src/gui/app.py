@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
     QGridLayout, QMessageBox, QApplication, QSplitter, QSizePolicy,
     QSlider, QStackedWidget, QComboBox
 )
-from PyQt6.QtGui import QIcon, QFont, QTextCursor, QPixmap, QBrush, QColor, QPainter, QPen, QImage, QLinearGradient, QPolygon, QDragEnterEvent, QDropEvent, QDragMoveEvent
+from PyQt6.QtGui import QIcon, QFont, QTextCursor, QPixmap, QBrush, QColor, QPainter, QPen, QImage, QLinearGradient, QPolygon, QDragEnterEvent, QDropEvent, QDragMoveEvent, QPainterPath
 
 from src.core.config import ProcessingConfig
 from src.core.processor import DicomProcessor
@@ -647,14 +647,32 @@ class DicomSplitterApp(QMainWindow):
         logo_path = self.project_root / "themes" / "logo.png"
         logo_pixmap = QPixmap(str(logo_path))
         if not logo_pixmap.isNull():
-            # Обрезаем изображение до квадрата вокруг центра (для получения круглого логотипа без полей)
+            # Обрезаем изображение до квадрата вокруг центра
             w = logo_pixmap.width()
             h = logo_pixmap.height()
             size = min(w, h)
             x = (w - size) // 2
             y = (h - size) // 2
             cropped = logo_pixmap.copy(x, y, size, size)
-            self.logo_label.setPixmap(cropped.scaled(56, 56, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+            
+            # Масштабируем до 56x56
+            scaled = cropped.scaled(56, 56, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            
+            # Маскируем углы кругом с прозрачным фоном
+            circular = QPixmap(56, 56)
+            circular.fill(Qt.GlobalColor.transparent)
+            
+            painter = QPainter(circular)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+            
+            path = QPainterPath()
+            path.addEllipse(0, 0, 56, 56)
+            painter.setClipPath(path)
+            painter.drawPixmap(0, 0, scaled)
+            painter.end()
+            
+            self.logo_label.setPixmap(circular)
         top_layout.addWidget(self.logo_label, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         self.title_label = QLabel()
