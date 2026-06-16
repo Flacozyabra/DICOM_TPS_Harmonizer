@@ -1519,33 +1519,34 @@ class CustomSplitterHandle(QSplitterHandle):
             painter.setPen(QPen(line_color, 1))
             painter.drawLine(cx, 0, cx, h)
 
-            # Рисуем плоскую высокую стрелочку: ширина 5px, высота 10px
+            # Рисуем плоскую высокую стрелочку: ширина 5px, высота 20px (основание вдвое шире)
             if not self.is_collapsed:
                 # Стрелочка влево ◀
                 poly.append(QPoint(cx - 2, cy))
-                poly.append(QPoint(cx + 2, cy - 5))
-                poly.append(QPoint(cx + 2, cy + 5))
+                poly.append(QPoint(cx + 2, cy - 10))
+                poly.append(QPoint(cx + 2, cy + 10))
             else:
                 # Стрелочка вправо ▶
                 poly.append(QPoint(cx + 2, cy))
-                poly.append(QPoint(cx - 2, cy - 5))
-                poly.append(QPoint(cx - 2, cy + 5))
+                poly.append(QPoint(cx - 2, cy - 10))
+                poly.append(QPoint(cx - 2, cy + 10))
         else:
             # Горизонтальная ручка вертикального сплиттера (для папок/настроек)
             painter.setPen(QPen(line_color, 1))
-            painter.drawLine(0, cy, w, cy)
+            # Делаем линию немного короче, чтобы она не наползала на скругленные углы плашек
+            painter.drawLine(15, cy, w - 15, cy)
 
-            # Рисуем плоскую широкую стрелочку: ширина 10px, высота 5px
+            # Рисуем плоскую широкую стрелочку: ширина 20px (основание вдвое шире), высота 5px
             if not self.is_collapsed:
                 # Стрелочка вверх ▲
                 poly.append(QPoint(cx, cy - 2))
-                poly.append(QPoint(cx - 5, cy + 2))
-                poly.append(QPoint(cx + 5, cy + 2))
+                poly.append(QPoint(cx - 10, cy + 2))
+                poly.append(QPoint(cx + 10, cy + 2))
             else:
                 # Стрелочка вниз ▼
                 poly.append(QPoint(cx, cy + 2))
-                poly.append(QPoint(cx - 5, cy - 2))
-                poly.append(QPoint(cx + 5, cy - 2))
+                poly.append(QPoint(cx - 10, cy - 2))
+                poly.append(QPoint(cx + 10, cy - 2))
 
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QBrush(arrow_color))
