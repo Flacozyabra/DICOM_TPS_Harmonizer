@@ -655,11 +655,11 @@ class DicomSplitterApp(QMainWindow):
             y = (h - size) // 2
             cropped = logo_pixmap.copy(x, y, size, size)
             
-            # Масштабируем до 56x56
-            scaled = cropped.scaled(56, 56, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            # Масштабируем до 42x42
+            scaled = cropped.scaled(42, 42, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
             
             # Маскируем углы кругом с прозрачным фоном
-            circular = QPixmap(56, 56)
+            circular = QPixmap(42, 42)
             circular.fill(Qt.GlobalColor.transparent)
             
             painter = QPainter(circular)
@@ -667,7 +667,7 @@ class DicomSplitterApp(QMainWindow):
             painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
             
             path = QPainterPath()
-            path.addEllipse(0, 0, 56, 56)
+            path.addEllipse(0, 0, 42, 42)
             painter.setClipPath(path)
             painter.drawPixmap(0, 0, scaled)
             painter.end()
