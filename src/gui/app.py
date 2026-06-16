@@ -1553,41 +1553,47 @@ class DicomSplitterApp(QMainWindow):
             self.add_log(self.loc('error_input_not_exist', input_dir), "error")
             return
 
-        selected_files = self.get_selected_files_or_autoscan()
-        if not selected_files:
-            self.add_log(self.loc('tree_empty'), "error")
-            return
+        # Определяем, скрыто ли дерево (первая секция горизонтального сплиттера)
+        is_tree_hidden = (self.splitter.sizes()[0] <= 5)
 
-        # Интерактивная валидация данных пациента
         patient_overrides = {}
-        patient_nodes = self.get_patient_nodes_data()
-        for p_item, pat_name, pat_id in patient_nodes:
-            any_selected = False
-            for j in range(p_item.childCount()):
-                study_item = p_item.child(j)
-                for k in range(study_item.childCount()):
-                    series_item = study_item.child(k)
-                    if series_item.checkState(0) == Qt.CheckState.Checked:
-                        any_selected = True
-                        break
-            if not any_selected:
-                continue
+        if is_tree_hidden:
+            selected_files = None
+        else:
+            selected_files = self.get_selected_files_or_autoscan()
+            if not selected_files:
+                self.add_log(self.loc('tree_empty'), "error")
+                return
 
-            is_valid = True
-            if not pat_name or pat_name.strip() == "" or pat_name.upper() == "UNKNOWN":
-                is_valid = False
-            if not pat_id or pat_id.strip() == "" or pat_id.upper() == "UNKNOWN":
-                is_valid = False
-            if len(pat_name) > 64 or len(pat_id) > 64:
-                is_valid = False
+            # Интерактивная валидация данных пациента (только если дерево не скрыто)
+            patient_nodes = self.get_patient_nodes_data()
+            for p_item, pat_name, pat_id in patient_nodes:
+                any_selected = False
+                for j in range(p_item.childCount()):
+                    study_item = p_item.child(j)
+                    for k in range(study_item.childCount()):
+                        series_item = study_item.child(k)
+                        if series_item.checkState(0) == Qt.CheckState.Checked:
+                            any_selected = True
+                            break
+                if not any_selected:
+                    continue
 
-            if not is_valid:
-                dialog = PatientEditDialog(self, pat_name, pat_id)
-                if dialog.exec() == QDialog.DialogCode.Accepted:
-                    new_name = dialog.new_name.strip()
-                    new_id = dialog.new_id.strip()
-                    if new_name and new_id:
-                        patient_overrides[(pat_name, pat_id)] = (new_name, new_id)
+                is_valid = True
+                if not pat_name or pat_name.strip() == "" or pat_name.upper() == "UNKNOWN":
+                    is_valid = False
+                if not pat_id or pat_id.strip() == "" or pat_id.upper() == "UNKNOWN":
+                    is_valid = False
+                if len(pat_name) > 64 or len(pat_id) > 64:
+                    is_valid = False
+
+                if not is_valid:
+                    dialog = PatientEditDialog(self, pat_name, pat_id)
+                    if dialog.exec() == QDialog.DialogCode.Accepted:
+                        new_name = dialog.new_name.strip()
+                        new_id = dialog.new_id.strip()
+                        if new_name and new_id:
+                            patient_overrides[(pat_name, pat_id)] = (new_name, new_id)
 
         self.is_processing = True
         self.stop_event.clear()
