@@ -97,7 +97,7 @@
     "selected_status": "Selected files: {} / {} (Patients: {}, Studies: {}, Series: {})",
     "update_title": "Update Available",
     "update_message": "A new version {} is available. Do you want to download it?",
-    "dont_show_again": "Don't show again",
+    "dont_show_again": "Skip this version",
     "viewer_close": "Close Viewer",
     "viewer_spacing": "Spacing: {:.1f} mm",
     "viewer_slice": "Slice: {} / {}",

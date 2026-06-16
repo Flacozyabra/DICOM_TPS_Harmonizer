@@ -252,6 +252,16 @@ class DicomSplitterApp(QMainWindow):
 
     def on_update_available(self, new_version: str, release_url: str) -> None:
         """Показывает диалог предложения обновить программу при обнаружении новой версии."""
+        config_file = self.get_config_path()
+        if config_file.exists():
+            try:
+                with open(config_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if data.get("skipped_version") == new_version:
+                        return
+            except Exception:
+                pass
+
         dialog = UpdateDialog(self, new_version)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             result = dialog.result_value
@@ -262,7 +272,24 @@ class DicomSplitterApp(QMainWindow):
                 except Exception:
                     pass
             elif result == "skip":
-                self.save_skip_update_check()
+                self.save_skipped_version(new_version)
+
+    def save_skipped_version(self, version: str) -> None:
+        """Сохраняет версию, которую пользователь решил пропустить, в config.json."""
+        config_file = self.get_config_path()
+        config_data = {}
+        if config_file.exists():
+            try:
+                with open(config_file, "r", encoding="utf-8") as f:
+                    config_data = json.load(f)
+            except Exception:
+                pass
+        config_data["skipped_version"] = version
+        try:
+            with open(config_file, "w", encoding="utf-8") as f:
+                json.dump(config_data, f, ensure_ascii=False, indent=4)
+        except Exception:
+            pass
 
     def save_skip_update_check(self) -> None:
         """Сохраняет флаг отключения проверки обновлений в config.json."""
