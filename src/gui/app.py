@@ -1282,6 +1282,7 @@ class DicomSplitterApp(QMainWindow):
             color = "#77dd77"
         formatted_text = f"<span style='color:#a0a0a0;'>[{timestamp}]</span> <span style='color:{color};'>{text}</span>"
         self.log_textbox.append(formatted_text)
+        self.log_textbox.moveCursor(QTextCursor.MoveOperation.End)
 
     def update_progress(self, current: int, total: int) -> None:
         if total > 0:
@@ -1300,6 +1301,7 @@ class DicomSplitterApp(QMainWindow):
         self.start_btn.setEnabled(True)
         self.apply_styles() # Обновит стиль (вернет синий цвет кнопки)
         self.set_gui_enabled(True)
+        self.log_textbox.moveCursor(QTextCursor.MoveOperation.End)
 
     def on_tree_scanned(self, tree_data: dict) -> None:
         self.populate_tree(tree_data)
