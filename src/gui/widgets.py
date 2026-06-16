@@ -1423,7 +1423,8 @@ class RightSplitterHandle(QSplitterHandle):
     def __init__(self, orientation: Qt.Orientation, parent: QSplitter) -> None:
         super().__init__(orientation, parent)
         self.is_collapsed = False
-        self.btn = None
+        self.setMouseTracking(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
 
     def get_handle_index(self) -> int:
         splitter = self.splitter()
@@ -1434,19 +1435,18 @@ class RightSplitterHandle(QSplitterHandle):
                 return i
         return -1
 
+    def enterEvent(self, event) -> None:
+        super().enterEvent(event)
+        self.update()
+
+    def leaveEvent(self, event) -> None:
+        super().leaveEvent(event)
+        self.update()
+
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         idx = self.get_handle_index()
         if idx in (1, 2):
-            if self.btn is None:
-                self.btn = QPushButton(self)
-                self.btn.setCursor(Qt.CursorShape.PointingHandCursor)
-                self.btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-                self.btn.setFixedSize(24, 10)
-                self.btn.clicked.connect(self.toggle_collapse)
-                self.btn.show()
-
-            # Автоматически синхронизируем состояние is_collapsed при перерасчете геометрии
             splitter = self.splitter()
             if splitter:
                 sizes = splitter.sizes()
@@ -1455,44 +1455,74 @@ class RightSplitterHandle(QSplitterHandle):
                         self.is_collapsed = (sizes[0] <= 5)
                     elif idx == 2:
                         self.is_collapsed = (sizes[1] <= 5)
-
-            self.update_button_style()
-            self.btn.move((self.width() - self.btn.width()) // 2, (self.height() - self.btn.height()) // 2)
-        else:
-            if self.btn is not None:
-                self.btn.hide()
+        self.update()
 
     def mouseMoveEvent(self, event) -> None:
         # Запрещаем изменение размеров перетаскиванием мыши вручную
         event.ignore()
 
     def mousePressEvent(self, event) -> None:
-        # Разрешаем клик по кнопке, но блокируем перетаскивание ручки
-        if self.btn and self.btn.geometry().contains(event.pos()):
-            super().mousePressEvent(event)
+        # При клике левой кнопкой мыши сворачиваем/разворачиваем панель
+        if event.button() == Qt.MouseButton.LeftButton:
+            idx = self.get_handle_index()
+            if idx in (1, 2):
+                self.toggle_collapse()
         else:
             event.ignore()
 
-    def update_button_style(self) -> None:
-        if self.btn is None:
+    def paintEvent(self, event) -> None:
+        idx = self.get_handle_index()
+        if idx not in (1, 2):
             return
-        arrow = "▲" if not self.is_collapsed else "▼"
-        self.btn.setText(arrow)
-        self.btn.setStyleSheet("""
-            QPushButton {
-                border: none;
-                background-color: transparent;
-                color: #888888;
-                font-size: 8px;
-                font-weight: bold;
-                line-height: 10px;
-                margin: 0;
-                padding: 0;
-            }
-            QPushButton:hover {
-                color: #3B82F6;
-            }
-        """)
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Цвета по умолчанию
+        line_color = QColor("#3F3F46")
+        if self.underMouse():
+            arrow_color = QColor("#3B82F6")
+        else:
+            arrow_color = QColor("#71717A")
+
+        # Загружаем палитру
+        main_win = self.window()
+        if hasattr(main_win, "current_theme") and hasattr(main_win, "THEMES"):
+            palette = main_win.THEMES[main_win.current_theme]
+            line_color = QColor(palette.get("BORDER_COLOR", "#3F3F46"))
+            if self.underMouse():
+                arrow_color = QColor(palette.get("ACCENT_COLOR", "#3B82F6"))
+            else:
+                arrow_color = QColor(palette.get("TEXT_MUTED", "#71717A"))
+
+        w = self.width()
+        h = self.height()
+        y = h // 2
+
+        # Рисуем горизонтальную линию
+        painter.setPen(QPen(line_color, 1))
+        painter.drawLine(0, y, w, y)
+
+        # Рисуем широкую плоскую стрелочку по центру
+        cx = w // 2
+        from PyQt6.QtGui import QPolygon
+        from PyQt6.QtCore import QPoint
+        poly = QPolygon()
+
+        if not self.is_collapsed:
+            # Стрелочка вверх ▲
+            poly.append(QPoint(cx, y - 2))
+            poly.append(QPoint(cx - 8, y + 1))
+            poly.append(QPoint(cx + 8, y + 1))
+        else:
+            # Стрелочка вниз ▼
+            poly.append(QPoint(cx, y + 2))
+            poly.append(QPoint(cx - 8, y - 1))
+            poly.append(QPoint(cx + 8, y - 1))
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(arrow_color))
+        painter.drawPolygon(poly)
 
     def toggle_collapse(self) -> None:
         splitter = self.splitter()
@@ -1525,7 +1555,7 @@ class RightSplitterHandle(QSplitterHandle):
                 splitter.setSizes(new_sizes)
                 self.is_collapsed = False
 
-        self.update_button_style()
+        self.update()
 
 
 class RightSplitter(QSplitter):

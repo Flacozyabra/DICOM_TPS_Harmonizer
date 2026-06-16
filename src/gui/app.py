@@ -1076,16 +1076,14 @@ class DicomSplitterApp(QMainWindow):
                 background-color: {palette['ACCENT_COLOR']};
             }}
             QSplitter#rightSplitter::handle {{
-                background-color: {palette['PANEL_BG']};
+                background-color: transparent;
             }}
             QSplitter#rightSplitter::handle:vertical {{
-                height: 12px;
+                height: 8px;
                 image: none;
-                border-top: 1px solid {palette['BORDER_COLOR']};
-                border-bottom: 1px solid {palette['BORDER_COLOR']};
             }}
             QSplitter#rightSplitter::handle:hover {{
-                background-color: {palette['PANEL_BG']};
+                background-color: transparent;
             }}
             QToolTip {{
                 background-color: {palette['PANEL_BG']};
