@@ -68,10 +68,9 @@
     "log_report_non_dicom": " - Non-DICOM files: {}",
     "log_report_no_pixels": " - Skipped files without pixel data: {}",
     "log_report_excluded": " - Excluded service series files: {}",
-    "log_report_saved": " - Successfully optimized and saved slices: {}",
+    "log_report_saved": " - Successfully optimized slices: {}",
     "log_report_errors": " - Errors during processing: {}",
     "log_report_duration": " - Execution time: {:.1f} sec.",
-    "log_report_applied_settings": " - Applied optimization settings:",
     "log_finished_success": "=== PROCESSING COMPLETED SUCCESSFULLY ===",
     "log_finished_warning": "=== PROCESSING COMPLETED WITH ERRORS ===",
     "log_finished_error": "=== PROCESSING FAILED ===",
@@ -120,7 +119,7 @@
     "theme_red": "Red",
     "theme_sunset": "Sunset",
     "theme_cyber": "Cyber",
-    "log_series_success": "[{}] {} ({}) | {} -> successfully optimized and saved {} slices",
-    "log_series_warning": "[{}] {} ({}) | {} -> optimized and saved {} slices, {} errors",
+    "log_series_success": "[{}] {} ({}) | {} -> successfully optimized {} slices",
+    "log_series_warning": "[{}] {} ({}) | {} -> optimized {} slices, {} errors",
     "mm": "mm"
 }
