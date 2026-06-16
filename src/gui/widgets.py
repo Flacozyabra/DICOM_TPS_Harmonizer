@@ -1417,8 +1417,8 @@ class DicomViewerPanel(QWidget):
             return None
 
 
-class RightSplitterHandle(QSplitterHandle):
-    """Кастомная ручка вертикального сплиттера со стрелочкой для скрытия/показа разделов."""
+class CustomSplitterHandle(QSplitterHandle):
+    """Кастомная ручка сплиттера со стрелочкой-рисованием (шевроном) и блокировкой Drag."""
 
     def __init__(self, orientation: Qt.Orientation, parent: QSplitter) -> None:
         super().__init__(orientation, parent)
@@ -1446,10 +1446,13 @@ class RightSplitterHandle(QSplitterHandle):
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         idx = self.get_handle_index()
-        if idx in (1, 2):
-            splitter = self.splitter()
-            if splitter:
-                sizes = splitter.sizes()
+        splitter = self.splitter()
+        if splitter and idx != -1:
+            sizes = splitter.sizes()
+            if splitter.orientation() == Qt.Orientation.Horizontal:
+                if len(sizes) >= 2 and idx == 1:
+                    self.is_collapsed = (sizes[0] <= 5)
+            else:
                 if len(sizes) >= 3:
                     if idx == 1:
                         self.is_collapsed = (sizes[0] <= 5)
@@ -1465,14 +1468,14 @@ class RightSplitterHandle(QSplitterHandle):
         # При клике левой кнопкой мыши сворачиваем/разворачиваем панель
         if event.button() == Qt.MouseButton.LeftButton:
             idx = self.get_handle_index()
-            if idx in (1, 2):
+            if idx != -1:
                 self.toggle_collapse()
         else:
             event.ignore()
 
     def paintEvent(self, event) -> None:
         idx = self.get_handle_index()
-        if idx not in (1, 2):
+        if idx == -1:
             return
 
         painter = QPainter(self)
@@ -1497,28 +1500,46 @@ class RightSplitterHandle(QSplitterHandle):
 
         w = self.width()
         h = self.height()
-        y = h // 2
-
-        # Рисуем горизонтальную линию
-        painter.setPen(QPen(line_color, 1))
-        painter.drawLine(0, y, w, y)
-
-        # Рисуем широкую плоскую стрелочку по центру
         cx = w // 2
+        cy = h // 2
+
+        # Рисуем разделительную линию и стрелочку в зависимости от ориентации
         from PyQt6.QtGui import QPolygon
         from PyQt6.QtCore import QPoint
         poly = QPolygon()
 
-        if not self.is_collapsed:
-            # Стрелочка вверх ▲
-            poly.append(QPoint(cx, y - 2))
-            poly.append(QPoint(cx - 8, y + 1))
-            poly.append(QPoint(cx + 8, y + 1))
+        if self.orientation() == Qt.Orientation.Horizontal:
+            # Вертикальная ручка горизонтального сплиттера (для левого дерева)
+            painter.setPen(QPen(line_color, 1))
+            painter.drawLine(cx, 0, cx, h)
+
+            # Рисуем плоскую высокую стрелочку: ширина 3px, высота 16px
+            if not self.is_collapsed:
+                # Стрелочка влево ◀
+                poly.append(QPoint(cx - 2, cy))
+                poly.append(QPoint(cx + 1, cy - 8))
+                poly.append(QPoint(cx + 1, cy + 8))
+            else:
+                # Стрелочка вправо ▶
+                poly.append(QPoint(cx + 2, cy))
+                poly.append(QPoint(cx - 1, cy - 8))
+                poly.append(QPoint(cx - 1, cy + 8))
         else:
-            # Стрелочка вниз ▼
-            poly.append(QPoint(cx, y + 2))
-            poly.append(QPoint(cx - 8, y - 1))
-            poly.append(QPoint(cx + 8, y - 1))
+            # Горизонтальная ручка вертикального сплиттера (для папок/настроек)
+            painter.setPen(QPen(line_color, 1))
+            painter.drawLine(0, cy, w, cy)
+
+            # Рисуем плоскую широкую стрелочку: ширина 16px, высота 3px
+            if not self.is_collapsed:
+                # Стрелочка вверх ▲
+                poly.append(QPoint(cx, cy - 2))
+                poly.append(QPoint(cx - 8, cy + 1))
+                poly.append(QPoint(cx + 8, cy + 1))
+            else:
+                # Стрелочка вниз ▼
+                poly.append(QPoint(cx, cy + 2))
+                poly.append(QPoint(cx - 8, cy - 1))
+                poly.append(QPoint(cx + 8, cy - 1))
 
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QBrush(arrow_color))
@@ -1530,39 +1551,54 @@ class RightSplitterHandle(QSplitterHandle):
             return
 
         sizes = splitter.sizes()
-        if len(sizes) < 3:
-            return
-
         idx = self.get_handle_index()
-        if idx == 1:
-            # Сворачиваем/разворачиваем первую панель (folder_frame, индекс 0)
-            if not self.is_collapsed:
-                new_sizes = [0, sizes[1], sizes[2] + sizes[0]]
-                splitter.setSizes(new_sizes)
-                self.is_collapsed = True
-            else:
-                new_sizes = [90, sizes[1], max(50, sizes[2] - 90)]
-                splitter.setSizes(new_sizes)
-                self.is_collapsed = False
-        elif idx == 2:
-            # Сворачиваем/разворачиваем вторую панель (settings_frame, индекс 1)
-            if not self.is_collapsed:
-                new_sizes = [sizes[0], 0, sizes[2] + sizes[1]]
-                splitter.setSizes(new_sizes)
-                self.is_collapsed = True
-            else:
-                new_sizes = [sizes[0], 135, max(50, sizes[2] - 135)]
-                splitter.setSizes(new_sizes)
-                self.is_collapsed = False
+
+        if splitter.orientation() == Qt.Orientation.Horizontal:
+            # Горизонтальный сплиттер (левое дерево, индекс ручки 1)
+            if len(sizes) < 2:
+                return
+            if idx == 1:
+                if not self.is_collapsed:
+                    new_sizes = [0, sizes[1] + sizes[0]]
+                    splitter.setSizes(new_sizes)
+                    self.is_collapsed = True
+                else:
+                    new_sizes = [365, max(50, sizes[1] + sizes[0] - 365)]
+                    splitter.setSizes(new_sizes)
+                    self.is_collapsed = False
+        else:
+            # Вертикальный сплиттер (папки/настройки)
+            if len(sizes) < 3:
+                return
+            if idx == 1:
+                # Сворачиваем/разворачиваем первую панель (folder_frame, индекс 0)
+                if not self.is_collapsed:
+                    new_sizes = [0, sizes[1], sizes[2] + sizes[0]]
+                    splitter.setSizes(new_sizes)
+                    self.is_collapsed = True
+                else:
+                    new_sizes = [90, sizes[1], max(50, sizes[2] + sizes[0] - 90)]
+                    splitter.setSizes(new_sizes)
+                    self.is_collapsed = False
+            elif idx == 2:
+                # Сворачиваем/разворачиваем вторую панель (settings_frame, индекс 1)
+                if not self.is_collapsed:
+                    new_sizes = [sizes[0], 0, sizes[2] + sizes[1]]
+                    splitter.setSizes(new_sizes)
+                    self.is_collapsed = True
+                else:
+                    new_sizes = [sizes[0], 135, max(50, sizes[2] + sizes[1] - 135)]
+                    splitter.setSizes(new_sizes)
+                    self.is_collapsed = False
 
         self.update()
 
 
-class RightSplitter(QSplitter):
-    """Кастомный вертикальный сплиттер с фиксированными размерами папок/настроек и отключенным Drag."""
+class CustomSplitter(QSplitter):
+    """Кастомный сплиттер (горизонтальный или вертикальный) с фиксированными размерами секций и отключенным Drag."""
 
     def __init__(self, orientation: Qt.Orientation, parent: QWidget = None) -> None:
         super().__init__(orientation, parent)
 
     def createHandle(self) -> QSplitterHandle:
-        return RightSplitterHandle(self.orientation(), self)
+        return CustomSplitterHandle(self.orientation(), self)

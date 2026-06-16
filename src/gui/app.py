@@ -25,7 +25,7 @@ from src.core.processor import DicomProcessor
 from src.utils.logger import BaseLogger
 from src.gui.threads import UpdateCheckerThread
 from src.gui.dialogs import CustomQuestionDialog, UpdateDialog, PatientEditDialog, ScanProgressDialog
-from src.gui.widgets import LanguageSwitch, HUVerticalSlider, DicomViewerWidget, DicomViewerPanel, RightSplitter
+from src.gui.widgets import LanguageSwitch, HUVerticalSlider, DicomViewerWidget, DicomViewerPanel, CustomSplitter
 from src.gui.styles import set_dark_titlebar
 
 
@@ -588,7 +588,8 @@ class DicomSplitterApp(QMainWindow):
         main_layout.setSpacing(0)
 
         # Создаем разделитель (splitter)
-        self.splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.splitter = CustomSplitter(Qt.Orientation.Horizontal)
+        self.splitter.setObjectName("leftSplitter")
 
         # ----------------------------------------------------
         # 1. Левая боковая панель (Проводник пациентов)
@@ -657,7 +658,7 @@ class DicomSplitterApp(QMainWindow):
         content_layout.addLayout(top_layout)
 
         # Создаем вертикальный разделитель для правой панели
-        self.right_splitter = RightSplitter(Qt.Orientation.Vertical)
+        self.right_splitter = CustomSplitter(Qt.Orientation.Vertical)
         self.right_splitter.setObjectName("rightSplitter")
 
         # Группа 1: Выбор папок
@@ -1083,6 +1084,16 @@ class DicomSplitterApp(QMainWindow):
                 image: none;
             }}
             QSplitter#rightSplitter::handle:hover {{
+                background-color: transparent;
+            }}
+            QSplitter#leftSplitter::handle {{
+                background-color: transparent;
+            }}
+            QSplitter#leftSplitter::handle:horizontal {{
+                width: 8px;
+                image: none;
+            }}
+            QSplitter#leftSplitter::handle:hover {{
                 background-color: transparent;
             }}
             QToolTip {{
