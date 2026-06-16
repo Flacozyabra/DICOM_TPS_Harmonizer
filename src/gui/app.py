@@ -600,7 +600,7 @@ class DicomSplitterApp(QMainWindow):
         self.sidebar_frame.setMaximumWidth(450) # Ограничивает максимальную ширину дерева при ресайзе
         
         sidebar_layout = QVBoxLayout(self.sidebar_frame)
-        sidebar_layout.setContentsMargins(15, 15, 15, 15)
+        sidebar_layout.setContentsMargins(15, 15, 20, 15)
         sidebar_layout.setSpacing(10)
 
         # Заголовок боковой панели и кнопка "Сканировать"
@@ -825,7 +825,7 @@ class DicomSplitterApp(QMainWindow):
         # Настройки сплиттеров
         self.splitter.setCollapsible(0, True)   # Дерево может быть скрыто полностью
         self.splitter.setCollapsible(1, False)  # Главную панель скрывать нельзя
-        self.splitter.setSizes([365, 735])      # Пропорции по умолчанию (365px ширина дерева)
+        self.splitter.setSizes([385, 715])      # Пропорции по умолчанию (385px ширина дерева)
         self.splitter.setStretchFactor(0, 1)    # Дерево проводника растягивается при увеличении окна
         self.splitter.setStretchFactor(1, 0)    # Правая область сохраняет свой размер
 

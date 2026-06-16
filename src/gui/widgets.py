@@ -1570,7 +1570,7 @@ class CustomSplitterHandle(QSplitterHandle):
                     splitter.setSizes(new_sizes)
                     self.is_collapsed = True
                 else:
-                    new_sizes = [365, max(50, sizes[1] + sizes[0] - 365)]
+                    new_sizes = [385, max(50, sizes[1] + sizes[0] - 385)]
                     splitter.setSizes(new_sizes)
                     self.is_collapsed = False
         else:
