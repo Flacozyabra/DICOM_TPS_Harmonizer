@@ -640,19 +640,29 @@ class DicomSplitterApp(QMainWindow):
 
         # Верхняя панель (Заголовок и Языковой переключатель)
         top_layout = QHBoxLayout()
-        top_layout.setSpacing(10)
+        top_layout.setSpacing(12)
 
         # Логотип программы перед заголовком
         self.logo_label = QLabel()
         logo_path = self.project_root / "themes" / "logo.png"
         logo_pixmap = QPixmap(str(logo_path))
         if not logo_pixmap.isNull():
-            self.logo_label.setPixmap(logo_pixmap.scaled(28, 28, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
-        top_layout.addWidget(self.logo_label)
+            # Обрезаем изображение до квадрата вокруг центра (для получения круглого логотипа без полей)
+            w = logo_pixmap.width()
+            h = logo_pixmap.height()
+            size = min(w, h)
+            x = (w - size) // 2
+            y = (h - size) // 2
+            cropped = logo_pixmap.copy(x, y, size, size)
+            self.logo_label.setPixmap(cropped.scaled(56, 56, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        top_layout.addWidget(self.logo_label, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         self.title_label = QLabel()
         self.title_label.setStyleSheet("font-size: 20px; font-weight: bold; color: #FFFFFF;")
-        top_layout.addWidget(self.title_label)
+        top_layout.addWidget(self.title_label, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        # Растяжение для прижатия левой части (лого + заголовок) влево
+        top_layout.addStretch(1)
 
         # Выпадающий список выбора цветовой темы
         self.theme_combo = QComboBox(self.content_frame)
