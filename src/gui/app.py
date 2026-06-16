@@ -25,7 +25,7 @@ from src.core.processor import DicomProcessor
 from src.utils.logger import BaseLogger
 from src.gui.threads import UpdateCheckerThread
 from src.gui.dialogs import CustomQuestionDialog, UpdateDialog, PatientEditDialog, ScanProgressDialog
-from src.gui.widgets import LanguageSwitch, HUVerticalSlider, DicomViewerWidget, DicomViewerPanel
+from src.gui.widgets import LanguageSwitch, HUVerticalSlider, DicomViewerWidget, DicomViewerPanel, RightSplitter
 from src.gui.styles import set_dark_titlebar
 
 
@@ -657,7 +657,8 @@ class DicomSplitterApp(QMainWindow):
         content_layout.addLayout(top_layout)
 
         # Создаем вертикальный разделитель для правой панели
-        self.right_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.right_splitter = RightSplitter(Qt.Orientation.Vertical)
+        self.right_splitter.setObjectName("rightSplitter")
 
         # Группа 1: Выбор папок
         folder_frame = QFrame()
@@ -1073,6 +1074,18 @@ class DicomSplitterApp(QMainWindow):
             }}
             QSplitter::handle:hover {{
                 background-color: {palette['ACCENT_COLOR']};
+            }}
+            QSplitter#rightSplitter::handle {{
+                background-color: {palette['PANEL_BG']};
+            }}
+            QSplitter#rightSplitter::handle:vertical {{
+                height: 12px;
+                image: none;
+                border-top: 1px solid {palette['BORDER_COLOR']};
+                border-bottom: 1px solid {palette['BORDER_COLOR']};
+            }}
+            QSplitter#rightSplitter::handle:hover {{
+                background-color: {palette['PANEL_BG']};
             }}
             QToolTip {{
                 background-color: {palette['PANEL_BG']};

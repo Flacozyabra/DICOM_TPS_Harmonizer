@@ -7,7 +7,7 @@ import pydicom
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QPoint, QRect, QPointF
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFrame, QLabel,
-    QPushButton, QComboBox, QSlider, QApplication
+    QPushButton, QComboBox, QSlider, QApplication, QSplitter, QSplitterHandle
 )
 from PyQt6.QtGui import (
     QIcon, QFont, QPixmap, QBrush, QColor, QPainter,
@@ -1415,3 +1415,124 @@ class DicomViewerPanel(QWidget):
             return QPixmap.fromImage(qimg)
         except Exception:
             return None
+
+
+class RightSplitterHandle(QSplitterHandle):
+    """Кастомная ручка вертикального сплиттера со стрелочкой для скрытия/показа разделов."""
+
+    def __init__(self, orientation: Qt.Orientation, parent: QSplitter) -> None:
+        super().__init__(orientation, parent)
+        self.is_collapsed = False
+        self.btn = None
+
+    def get_handle_index(self) -> int:
+        splitter = self.splitter()
+        if not splitter:
+            return -1
+        for i in range(1, splitter.count()):
+            if splitter.handle(i) is self:
+                return i
+        return -1
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        idx = self.get_handle_index()
+        if idx in (1, 2):
+            if self.btn is None:
+                self.btn = QPushButton(self)
+                self.btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                self.btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+                self.btn.setFixedSize(24, 10)
+                self.btn.clicked.connect(self.toggle_collapse)
+                self.btn.show()
+
+            # Автоматически синхронизируем состояние is_collapsed при перерасчете геометрии
+            splitter = self.splitter()
+            if splitter:
+                sizes = splitter.sizes()
+                if len(sizes) >= 3:
+                    if idx == 1:
+                        self.is_collapsed = (sizes[0] <= 5)
+                    elif idx == 2:
+                        self.is_collapsed = (sizes[1] <= 5)
+
+            self.update_button_style()
+            self.btn.move((self.width() - self.btn.width()) // 2, (self.height() - self.btn.height()) // 2)
+        else:
+            if self.btn is not None:
+                self.btn.hide()
+
+    def mouseMoveEvent(self, event) -> None:
+        # Запрещаем изменение размеров перетаскиванием мыши вручную
+        event.ignore()
+
+    def mousePressEvent(self, event) -> None:
+        # Разрешаем клик по кнопке, но блокируем перетаскивание ручки
+        if self.btn and self.btn.geometry().contains(event.pos()):
+            super().mousePressEvent(event)
+        else:
+            event.ignore()
+
+    def update_button_style(self) -> None:
+        if self.btn is None:
+            return
+        arrow = "▲" if not self.is_collapsed else "▼"
+        self.btn.setText(arrow)
+        self.btn.setStyleSheet("""
+            QPushButton {
+                border: none;
+                background-color: transparent;
+                color: #888888;
+                font-size: 8px;
+                font-weight: bold;
+                line-height: 10px;
+                margin: 0;
+                padding: 0;
+            }
+            QPushButton:hover {
+                color: #3B82F6;
+            }
+        """)
+
+    def toggle_collapse(self) -> None:
+        splitter = self.splitter()
+        if not splitter:
+            return
+
+        sizes = splitter.sizes()
+        if len(sizes) < 3:
+            return
+
+        idx = self.get_handle_index()
+        if idx == 1:
+            # Сворачиваем/разворачиваем первую панель (folder_frame, индекс 0)
+            if not self.is_collapsed:
+                new_sizes = [0, sizes[1], sizes[2] + sizes[0]]
+                splitter.setSizes(new_sizes)
+                self.is_collapsed = True
+            else:
+                new_sizes = [90, sizes[1], max(50, sizes[2] - 90)]
+                splitter.setSizes(new_sizes)
+                self.is_collapsed = False
+        elif idx == 2:
+            # Сворачиваем/разворачиваем вторую панель (settings_frame, индекс 1)
+            if not self.is_collapsed:
+                new_sizes = [sizes[0], 0, sizes[2] + sizes[1]]
+                splitter.setSizes(new_sizes)
+                self.is_collapsed = True
+            else:
+                new_sizes = [sizes[0], 135, max(50, sizes[2] - 135)]
+                splitter.setSizes(new_sizes)
+                self.is_collapsed = False
+
+        self.update_button_style()
+
+
+class RightSplitter(QSplitter):
+    """Кастомный вертикальный сплиттер с фиксированными размерами папок/настроек и отключенным Drag."""
+
+    def __init__(self, orientation: Qt.Orientation, parent: QWidget = None) -> None:
+        super().__init__(orientation, parent)
+
+    def createHandle(self) -> QSplitterHandle:
+        return RightSplitterHandle(self.orientation(), self)
