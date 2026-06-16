@@ -486,6 +486,29 @@ class DicomProcessor:
             self.logger.log(self.loc("log_report_saved", self.success_count))
             self.logger.log(self.loc("log_report_errors", self.error_count))
             self.logger.log(self.loc("log_report_duration", duration))
+            
+            # Формируем список примененных настроек оптимизации
+            applied_settings_str = []
+            if self.config.new_uids:
+                applied_settings_str.append(f"   * {self.loc('generate_uids')}: {self.loc('yes')}")
+            if self.config.split_multiframe:
+                applied_settings_str.append(f"   * {self.loc('split_multiframe')}: {self.loc('yes')}")
+            if self.config.clean_tags:
+                applied_settings_str.append(f"   * {self.loc('clean_tags')}: {self.loc('yes')}")
+            if self.config.default_tags:
+                applied_settings_str.append(f"   * {self.loc('fill_mandatory')}: {self.loc('yes')}")
+            if self.config.explicit_vr:
+                applied_settings_str.append(f"   * {self.loc('write_explicit')}: {self.loc('yes')}")
+            if self.config.exclude_reports:
+                applied_settings_str.append(f"   * {self.loc('exclude_reports')}: {self.loc('yes')}")
+            if self.config.split_series:
+                applied_settings_str.append(f"   * {self.loc('split_series')}: {self.loc('yes')}")
+                
+            if applied_settings_str:
+                self.logger.log(self.loc("log_report_applied_settings"))
+                for setting in applied_settings_str:
+                    self.logger.log(setting)
+                    
             self.logger.log(self.loc("log_report_separator"))
 
             if self.success_count > 0 and self.error_count == 0:
