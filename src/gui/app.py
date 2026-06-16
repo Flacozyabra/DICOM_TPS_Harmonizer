@@ -640,6 +640,16 @@ class DicomSplitterApp(QMainWindow):
 
         # Верхняя панель (Заголовок и Языковой переключатель)
         top_layout = QHBoxLayout()
+        top_layout.setSpacing(10)
+
+        # Логотип программы перед заголовком
+        self.logo_label = QLabel()
+        logo_path = self.project_root / "themes" / "logo.png"
+        logo_pixmap = QPixmap(str(logo_path))
+        if not logo_pixmap.isNull():
+            self.logo_label.setPixmap(logo_pixmap.scaled(28, 28, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        top_layout.addWidget(self.logo_label)
+
         self.title_label = QLabel()
         self.title_label.setStyleSheet("font-size: 20px; font-weight: bold; color: #FFFFFF;")
         top_layout.addWidget(self.title_label)
