@@ -1151,8 +1151,7 @@ class DicomViewerPanel(QWidget):
                 ds = pydicom.dcmread(f, stop_before_pixels=True)
                 
                 # Пропускаем файлы без пикселей (отчеты, презентационные состояния и т.д.)
-                has_pixels = any(tag in ds for tag in ['PixelData', 'FloatPixelData', 'DoubleFloatPixelData'])
-                if not has_pixels:
+                if 'Rows' not in ds or 'Columns' not in ds:
                     continue
                 
                 ipp = getattr(ds, "ImagePositionPatient", None)
