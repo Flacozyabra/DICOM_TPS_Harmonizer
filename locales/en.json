@@ -13,7 +13,7 @@
     "fill_mandatory": "Fill mandatory tags by default",
     "write_explicit": "Write in Explicit VR Little Endian (uncompressed)",
     "exclude_reports": "Exclude reports, protocols, and topograms",
-    "exclude_localizers": "Exclude localizers",
+    "exclude_localizers": "Exclude localizer",
     "log_title": "Operation Progress Log",
     "ready": "Ready (0%)",
     "processing": "Processing... {}%",
@@ -38,7 +38,6 @@
     "error_input_not_exist_warning": "Input folder does not exist: {}",
     "error_input_path_not_set": "Error: Input path is not set.",
     "error_output_path_not_set": "Error: Output path is not set.",
-
     "log_start": "=== STARTING DICOM PROCESSING ===",
     "log_input_dir": "Input folder: {}",
     "log_output_dir": "Output folder: {}",

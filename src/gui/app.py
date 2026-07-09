@@ -1556,7 +1556,8 @@ class DicomSplitterApp(QMainWindow):
         temp_config = ProcessingConfig(
             new_uids=False, split_multiframe=False, clean_tags=False,
             default_tags=False, explicit_vr=False, exclude_reports=False,
-            split_series=self.cb_split_series.isChecked()
+            split_series=self.cb_split_series.isChecked(),
+            exclude_localizers=False
         )
         logger = QtLogger(self.bridge)
         processor = DicomProcessor(path, self.output_entry.text(), temp_config, logger, stop_event, lang=self.current_lang)
