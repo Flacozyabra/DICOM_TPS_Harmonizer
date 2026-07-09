@@ -33,6 +33,9 @@ def safe_dcmread(file_path: Path, stop_before_pixels: bool = False) -> Dataset:
                 ds.decompress()
             except AttributeError:
                 pass
+            except ValueError as e:
+                if "already uncompressed" not in str(e):
+                    raise
             
         return ds
         
@@ -55,6 +58,9 @@ def safe_dcmread(file_path: Path, stop_before_pixels: bool = False) -> Dataset:
                     ds.decompress()
                 except AttributeError:
                     pass
+                except ValueError as e:
+                    if "already uncompressed" not in str(e):
+                        raise
                 
             return ds
             
