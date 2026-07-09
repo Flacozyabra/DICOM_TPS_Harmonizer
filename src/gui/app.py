@@ -231,7 +231,7 @@ class DicomSplitterApp(QMainWindow):
         self.center_on_screen()
         self.restore_window_state()
 
-        self.VERSION = "2.0.1"
+        self.VERSION = "2.1.0"
         self.check_updates()
 
     def check_updates(self) -> None:
