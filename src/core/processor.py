@@ -653,6 +653,14 @@ class DicomProcessor:
             self.logger.update_scan_progress(0, total_files)
 
         tree = {}
+        problems = {
+            'implicit_vr': 0,
+            'multiframe': 0,
+            'private_tags': 0,
+            'bits_allocated': 0,
+            'missing_tags': 0,
+            'corrupted_siemens': 0
+        }
         for idx, file_path in enumerate(all_files):
             if self.stop_event.is_set():
                 break
@@ -660,6 +668,45 @@ class DicomProcessor:
                 ds = safe_dcmread(file_path, stop_before_pixels=True)
             except Exception:
                 continue
+
+            # Сбор статистики проблем
+            try:
+                if getattr(ds, 'file_meta', None) and getattr(ds.file_meta, 'TransferSyntaxUID', None) and ds.file_meta.TransferSyntaxUID.is_implicit_VR:
+                    problems['implicit_vr'] += 1
+            except Exception:
+                pass
+
+            try:
+                if hasattr(ds, 'NumberOfFrames') and int(ds.NumberOfFrames) > 1:
+                    problems['multiframe'] += 1
+            except Exception:
+                pass
+
+            try:
+                if any(tag.is_private for tag in ds.keys()):
+                    problems['private_tags'] += 1
+            except Exception:
+                pass
+
+            try:
+                if hasattr(ds, 'BitsAllocated') and ds.BitsAllocated != 16:
+                    problems['bits_allocated'] += 1
+            except Exception:
+                pass
+
+            try:
+                missing = False
+                for tag in ['AccessionNumber', 'StudyID', 'ReferringPhysicianName']:
+                    if not hasattr(ds, tag) or not getattr(ds, tag):
+                        missing = True
+                        break
+                if missing:
+                    problems['missing_tags'] += 1
+            except Exception:
+                pass
+
+            if getattr(ds, 'is_restored', False):
+                problems['corrupted_siemens'] += 1
 
             patient_name = str(getattr(ds, 'PatientName', 'UNKNOWN'))
             patient_id = str(getattr(ds, 'PatientID', 'UNKNOWN'))
@@ -726,5 +773,25 @@ class DicomProcessor:
             
             if final_studies:
                 final_tree[(pat_name, pat_id)] = final_studies
+
+        # Вывод статистики обнаруженных проблем
+        has_any_problem = any(val > 0 for val in problems.values())
+        self.logger.log(self.loc("scan_stats_title"))
+        if has_any_problem:
+            if problems['implicit_vr'] > 0:
+                self.logger.log(self.loc("scan_stats_implicit_vr", problems['implicit_vr']), "warning")
+            if problems['multiframe'] > 0:
+                self.logger.log(self.loc("scan_stats_multiframe", problems['multiframe']), "warning")
+            if problems['private_tags'] > 0:
+                self.logger.log(self.loc("scan_stats_private_tags", problems['private_tags']), "warning")
+            if problems['bits_allocated'] > 0:
+                self.logger.log(self.loc("scan_stats_bits_allocated", problems['bits_allocated']), "warning")
+            if problems['missing_tags'] > 0:
+                self.logger.log(self.loc("scan_stats_missing_tags", problems['missing_tags']), "warning")
+            if problems['corrupted_siemens'] > 0:
+                self.logger.log(self.loc("scan_stats_corrupted_siemens", problems['corrupted_siemens']), "warning")
+        else:
+            self.logger.log(self.loc("scan_stats_none"), "success")
+        self.logger.log(self.loc("scan_stats_end"))
 
         return final_tree

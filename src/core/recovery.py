@@ -62,6 +62,7 @@ def safe_dcmread(file_path: Path, stop_before_pixels: bool = False) -> Dataset:
                     if "already uncompressed" not in str(e):
                         raise
                 
+            ds.is_restored = True
             return ds
             
         except Exception as fix_err:

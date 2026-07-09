@@ -1542,6 +1542,7 @@ class DicomSplitterApp(QMainWindow):
         if not path.exists():
             return
 
+        self.log_textbox.clear()
         self.scan_btn.setEnabled(False)
         self.scan_btn.setText(self.loc("tree_loading"))
         self.selection_label.setText(self.loc("tree_loading"))
