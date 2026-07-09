@@ -301,6 +301,7 @@ class DicomProcessor:
         self.logger.log(self.loc("log_setting_default", self.config.default_tags))
         self.logger.log(self.loc("log_setting_explicit", self.config.explicit_vr))
         self.logger.log(self.loc("log_setting_exclude", self.config.exclude_reports))
+        self.logger.log(self.loc("log_setting_exclude_localizers", self.config.exclude_localizers))
 
         try:
             if self.selected_files is not None:
@@ -534,6 +535,31 @@ class DicomProcessor:
             is_excluded = any(kw in series_desc_lower for kw in exclude_keywords) or modality in ('SR', 'PR')
             if is_excluded:
                 self.logger.log(self.loc("log_skip_service", series_desc, modality))
+                self.excluded_count += len(items)
+                self.processed_count += len(items)
+                self.logger.update_progress(self.processed_count, total_files)
+                return
+
+        # Исключение локалайзеров
+        if self.config.exclude_localizers:
+            is_localizer = False
+            series_desc_lower = series_desc.lower()
+            if 'localizer' in series_desc_lower or 'scout' in series_desc_lower or 'topogram' in series_desc_lower:
+                is_localizer = True
+            
+            if not is_localizer:
+                try:
+                    image_type = getattr(first_ds, 'ImageType', [])
+                    if image_type:
+                        if isinstance(image_type, str):
+                            image_type = [image_type]
+                        if any('LOCALIZER' in str(t).upper() for t in image_type):
+                            is_localizer = True
+                except Exception:
+                    pass
+            
+            if is_localizer:
+                self.logger.log(self.loc("log_skip_localizer", series_desc, modality))
                 self.excluded_count += len(items)
                 self.processed_count += len(items)
                 self.logger.update_progress(self.processed_count, total_files)

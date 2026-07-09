@@ -14,3 +14,4 @@ class ProcessingConfig:
     explicit_vr: bool
     exclude_reports: bool
     split_series: bool
+    exclude_localizers: bool

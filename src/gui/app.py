@@ -544,6 +544,7 @@ class DicomSplitterApp(QMainWindow):
         self.cb_explicit_vr.setText(self.loc("write_explicit"))
         self.cb_exclude_reports.setText(self.loc("exclude_reports"))
         self.cb_split_series.setText(self.loc("split_series"))
+        self.cb_exclude_localizers.setText(self.loc("exclude_localizers"))
         
         self.sidebar_title.setText(self.loc("patient_explorer"))
         self.scan_btn.setText(self.loc("scan_input"))
@@ -803,6 +804,10 @@ class DicomSplitterApp(QMainWindow):
         self.cb_split_series = QCheckBox()
         self.cb_split_series.setChecked(True)
         settings_layout.addWidget(self.cb_split_series, 4, 0)
+
+        self.cb_exclude_localizers = QCheckBox()
+        self.cb_exclude_localizers.setChecked(True)
+        settings_layout.addWidget(self.cb_exclude_localizers, 4, 1)
 
 
 
@@ -1652,7 +1657,8 @@ class DicomSplitterApp(QMainWindow):
             default_tags=self.cb_default_tags.isChecked(),
             explicit_vr=self.cb_explicit_vr.isChecked(),
             exclude_reports=self.cb_exclude_reports.isChecked(),
-            split_series=self.cb_split_series.isChecked()
+            split_series=self.cb_split_series.isChecked(),
+            exclude_localizers=self.cb_exclude_localizers.isChecked()
         )
 
         logger = QtLogger(self.bridge)
