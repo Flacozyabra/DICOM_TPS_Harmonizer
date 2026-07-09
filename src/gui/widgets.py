@@ -1150,6 +1150,11 @@ class DicomViewerPanel(QWidget):
                 # Быстрое сканирование тегов для сортировки
                 ds = pydicom.dcmread(f, stop_before_pixels=True)
                 
+                # Пропускаем файлы без пикселей (отчеты, презентационные состояния и т.д.)
+                has_pixels = any(tag in ds for tag in ['PixelData', 'FloatPixelData', 'DoubleFloatPixelData'])
+                if not has_pixels:
+                    continue
+                
                 ipp = getattr(ds, "ImagePositionPatient", None)
                 z_coord = float(ipp[2]) if ipp and len(ipp) >= 3 else 0.0
                 instance_number = int(getattr(ds, "InstanceNumber", 0))
@@ -1397,6 +1402,10 @@ class DicomViewerPanel(QWidget):
                 pass
 
             arr = ds.pixel_array.astype(float)
+            if len(arr.shape) == 3:
+                arr = arr[0]
+            elif len(arr.shape) == 4:
+                arr = arr[0, 0]
             slope = float(getattr(ds, "RescaleSlope", 1.0))
             intercept = float(getattr(ds, "RescaleIntercept", 0.0))
             arr = arr * slope + intercept
