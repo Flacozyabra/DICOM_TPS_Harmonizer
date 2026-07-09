@@ -48,7 +48,7 @@
     "log_setting_default": " - Fill default tags: {}",
     "log_setting_explicit": " - Output in Explicit VR Little Endian: {}",
     "log_setting_exclude": " - Exclude reports/protocols/topograms: {}",
-    "log_setting_exclude_localizers": " - Exclude localizers: {}",
+    "log_setting_exclude_localizers": " - Exclude localizer: {}",
     "log_search_files": "Searching for DICOM files...",
     "log_files_found": "Files found for analysis: {}",
     "log_files_not_found": "No DICOM files found in folder {}.",

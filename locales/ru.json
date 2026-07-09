@@ -48,7 +48,7 @@
     "log_setting_default": " - Заполнять теги по умолчанию: {}",
     "log_setting_explicit": " - Вывод в Explicit VR Little Endian: {}",
     "log_setting_exclude": " - Исключать отчеты/протоколы/топограммы: {}",
-    "log_setting_exclude_localizers": " - Исключать локалайзеры: {}",
+    "log_setting_exclude_localizers": " - Исключать localizer: {}",
     "log_search_files": "Поиск DICOM-файлов...",
     "log_files_found": "Найдено файлов для анализа: {}",
     "log_files_not_found": "В папке {} файлы DICOM не найдены.",
