@@ -1157,7 +1157,13 @@ class DicomViewerPanel(QWidget):
                 ipp = getattr(ds, "ImagePositionPatient", None)
                 z_coord = float(ipp[2]) if ipp and len(ipp) >= 3 else 0.0
                 instance_number = int(getattr(ds, "InstanceNumber", 0))
-                slices.append((f, z_coord, instance_number))
+                
+                n_frames = int(getattr(ds, "NumberOfFrames", 1))
+                if n_frames > 1:
+                    for frame_idx in range(n_frames):
+                        slices.append((f, frame_idx, z_coord, instance_number))
+                else:
+                    slices.append((f, 0, z_coord, instance_number))
             except Exception:
                 pass
 
@@ -1167,9 +1173,9 @@ class DicomViewerPanel(QWidget):
             self.is_loading = False
             return
 
-        # Сортируем срезы по Z-координате
-        slices.sort(key=lambda x: (x[1], x[2]))
-        self.sorted_files = [x[0] for x in slices]
+        # Сортируем срезы по Z-координате, InstanceNumber и frame_idx
+        slices.sort(key=lambda x: (x[2], x[3], x[1]))
+        self.sorted_files = [(x[0], x[1]) for x in slices]
 
         self.slider.setRange(0, len(self.sorted_files) - 1)
         self.is_loading = False
@@ -1247,7 +1253,7 @@ class DicomViewerPanel(QWidget):
         self.current_index = index
         self.slider.setValue(index)
 
-        filepath = self.sorted_files[index]
+        filepath, frame_idx = self.sorted_files[index]
         import pydicom
         try:
             # Читаем файл. Сначала пробуем обычное чтение.
@@ -1289,7 +1295,7 @@ class DicomViewerPanel(QWidget):
             self.lbl_info.setText(info_text)
             self.viewer.set_slice_info(index + 1, len(self.sorted_files))
 
-            pixmap = self.dicom_to_pixmap(ds, self.window_width, self.window_center)
+            pixmap = self.dicom_to_pixmap(ds, self.window_width, self.window_center, frame_idx)
             if pixmap:
                 self.viewer.set_dicom_image(pixmap, ds)
                 self.viewer.set_window_params(self.window_width, self.window_center)
@@ -1385,7 +1391,7 @@ class DicomViewerPanel(QWidget):
 
         self.on_window_changed(self.window_width, self.window_center)
 
-    def dicom_to_pixmap(self, ds, window_width: float, window_center: float) -> QPixmap | None:
+    def dicom_to_pixmap(self, ds, window_width: float, window_center: float, frame_idx: int = 0) -> QPixmap | None:
         try:
             import numpy as np
             if not hasattr(ds, "pixel_array"):
@@ -1402,9 +1408,9 @@ class DicomViewerPanel(QWidget):
 
             arr = ds.pixel_array.astype(float)
             if len(arr.shape) == 3:
-                arr = arr[0]
+                arr = arr[frame_idx]
             elif len(arr.shape) == 4:
-                arr = arr[0, 0]
+                arr = arr[frame_idx, 0]
             slope = float(getattr(ds, "RescaleSlope", 1.0))
             intercept = float(getattr(ds, "RescaleIntercept", 0.0))
             arr = arr * slope + intercept
