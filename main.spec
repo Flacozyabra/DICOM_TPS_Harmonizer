@@ -34,7 +34,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='DICOM_TPS_Harmonizer_v2.1.0',
+    name='DICOM_TPS_Harmonizer',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

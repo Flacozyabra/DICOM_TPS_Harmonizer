@@ -32,7 +32,6 @@
   `Dicom_output / <Имя_Пациента>_<ID_Пациента> / <Модальность_Описание_Серии> / slice_XXXX.dcm`
 * **Интерактивный DICOM вьюер:** Встроенный инструмент просмотра серий с поддержкой масштабирования (Zoom), перемещения (Pan), измерительной линейки и тонкой настройки HU через слайдеры панели управления.
 * **Drag-and-Drop:** Удобный импорт путей перетаскиванием файлов или папок прямо в поля ввода.
-* **Кастомизация дизайна:** Выбор из 5 встроенных цветовых тем («Темная», «Светлая», «Красная», «Закат» и «Кибер») с динамической адаптацией Windows DWM-заголовков.
 * **Современный GUI:** Интерфейс на базе `PyQt6` с автоподбором размеров проводника пациентов и цветовым логированием в реальном времени.
 * **Мультиязычность:** Встроенная поддержка русского и английского языков для интерфейса и логов процессора.
 
@@ -62,7 +61,6 @@
   `Dicom_output / <PatientName>_<PatientID> / <Modality_SeriesDescription> / slice_XXXX.dcm`
 * **Interactive DICOM Viewer:** Integrated series visualization featuring Zoom, Pan, measurement ruler, and HU window Level/Width sliders.
 * **Drag-and-Drop Support:** Drag folders or files directly into path input fields.
-* **UI Customization:** Choose between 5 built-in color themes ("Dark", "Light", "Red", "Sunset", and "Cyber") with native Windows DWM title bar adaptation.
 * **Modern GUI:** Sleek interface built with `PyQt6`, featuring automatic patient explorer resizing and real-time color logging.
 * **Multi-language support:** Built-in Russian and English localizations for both GUI and execution logs.
 

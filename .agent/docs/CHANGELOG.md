@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [2.2.0] - 2026-09-16
 ### Added
 - **Seamless GitHub Auto-Update (`src/utils/updater.py`)**:
   - Implemented GitHub Releases API query to fetch the latest tag, release notes URL, and asset binaries.
@@ -17,3 +19,5 @@ All notable changes to this project will be documented in this file.
   - Updated `UpdateDialog` in `src/gui/dialogs.py` with full theme styling and accent colors.
 - **Localization (`locales/ru.json`, `locales/en.json`)**:
   - Added Russian and English strings for update confirmation, download progress, download speed, and update error notifications.
+### Changed
+- Standardized release executable filename to `DICOM_TPS_Harmonizer.exe` (removed version suffix from binary name) to ensure persistent shortcuts and clean auto-updates.
