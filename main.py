@@ -22,6 +22,13 @@ except ImportError as e:
 if __name__ == "__main__":
     import multiprocessing
     multiprocessing.freeze_support()
+
+    # Очистка старых версий файлов после бесшовного автообновления
+    try:
+        from src.utils.updater import cleanup_old_exe
+        cleanup_old_exe()
+    except Exception:
+        pass
     if not pyqt_available:
         try:
             import ctypes

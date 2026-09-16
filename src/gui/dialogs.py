@@ -55,29 +55,37 @@ class CustomQuestionDialog(QDialog):
         set_dark_titlebar(self)
 
 
+from src.gui.styles import set_dark_titlebar, apply_dialog_theme, set_window_titlebar_theme
+
+
 class UpdateDialog(QDialog):
-    """Кастомный диалог с вопросом об обновлении версии."""
+    """Кастомный диалог с вопросом об обновлении версии, стилизованный под активную тему."""
 
     def __init__(self, parent: QWidget, new_version: str) -> None:
         super().__init__(parent)
         self.setWindowTitle(parent.loc("update_title"))
-        self.setFixedSize(420, 160)
+        self.setMinimumWidth(440)
         self.setModal(True)
         self.result_value = None
 
+        # Применяем тему программы
+        apply_dialog_theme(self, parent)
+
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(16)
 
         # Форматируем сообщение с версией
         message = parent.loc("update_message").format(new_version)
         lbl = QLabel(message, self)
         lbl.setWordWrap(True)
         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl.setStyleSheet("font-size: 13px;")
+        lbl.setStyleSheet("font-size: 13px; line-height: 1.4;")
         layout.addWidget(lbl)
 
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(10)
+        btn_layout.addStretch()
 
         # Тексты кнопок
         text_yes = parent.loc("yes")
@@ -85,6 +93,7 @@ class UpdateDialog(QDialog):
         text_skip = parent.loc("dont_show_again")
 
         btn_yes = QPushButton(text_yes, self)
+        btn_yes.setObjectName("primaryBtn")
         btn_yes.clicked.connect(lambda: self.finish("yes"))
         btn_layout.addWidget(btn_yes)
 
@@ -96,6 +105,7 @@ class UpdateDialog(QDialog):
         btn_skip.clicked.connect(lambda: self.finish("skip"))
         btn_layout.addWidget(btn_skip)
 
+        btn_layout.addStretch()
         layout.addLayout(btn_layout)
 
     def finish(self, val: str) -> None:
@@ -104,7 +114,7 @@ class UpdateDialog(QDialog):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        set_dark_titlebar(self)
+        set_window_titlebar_theme(self)
 
 
 class PatientEditDialog(QDialog):

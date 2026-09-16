@@ -23,10 +23,10 @@ from PyQt6.QtGui import QIcon, QFont, QTextCursor, QPixmap, QBrush, QColor, QPai
 from src.core.config import ProcessingConfig
 from src.core.processor import DicomProcessor
 from src.utils.logger import BaseLogger
-from src.gui.threads import UpdateCheckerThread
+from src.utils.updater import UpdateCheckWorker, is_newer_version, run_auto_update
 from src.gui.dialogs import CustomQuestionDialog, UpdateDialog, PatientEditDialog, ScanProgressDialog
 from src.gui.widgets import LanguageSwitch, HUVerticalSlider, DicomViewerWidget, DicomViewerPanel, CustomSplitter
-from src.gui.styles import set_dark_titlebar
+from src.gui.styles import THEMES, set_dark_titlebar, set_window_titlebar_theme, apply_dialog_theme
 
 
 
@@ -86,113 +86,7 @@ class DicomSplitterApp(QMainWindow):
         self.bridge.tree_scanned_signal.connect(self.on_tree_scanned)
         self.bridge.finished_signal.connect(self.on_processing_finished)
 
-        self.THEMES = {
-            "dark": {
-                "MAIN_BG": "#121212",
-                "PANEL_BG": "#1A1A1A",
-                "TEXT_COLOR": "#D1D5DB",
-                "TEXT_LIGHT": "#FFFFFF",
-                "TEXT_MUTED": "#A0A0A0",
-                "BORDER_COLOR": "#2D2D2D",
-                "BORDER_COLOR_ALT": "#374151",
-                "BUTTON_BG": "#2A2A2A",
-                "BUTTON_HOVER_BG": "#374151",
-                "BUTTON_PRESSED_BG": "#1F2937",
-                "ACCENT_COLOR": "#3B82F6",
-                "ACCENT_COLOR_DARK": "#2563EB",
-                "ACCENT_COLOR_DEEP": "#1D4ED8",
-                "PROGRESS_BG": "#151515",
-                "PROGRESS_BORDER": "#333333",
-                "GRADIENT_START": "#3B82F6",
-                "GRADIENT_END": "#8B5CF6",
-                "ARROW_RIGHT_PATH": "arrow_right.png",
-                "SPLITTER_COLOR": "#2D2D2D"
-            },
-            "light": {
-                "MAIN_BG": "#E2E2E2",
-                "PANEL_BG": "#F0F0F0",
-                "TEXT_COLOR": "#202020",
-                "TEXT_LIGHT": "#000000",
-                "TEXT_MUTED": "#5E5E5E",
-                "BORDER_COLOR": "#CCCCCC",
-                "BORDER_COLOR_ALT": "#9E9E9E",
-                "BUTTON_BG": "#D5D5D5",
-                "BUTTON_HOVER_BG": "#C0C0C0",
-                "BUTTON_PRESSED_BG": "#A0A0A0",
-                "ACCENT_COLOR": "#757575",
-                "ACCENT_COLOR_DARK": "#424242",
-                "ACCENT_COLOR_DEEP": "#212121",
-                "PROGRESS_BG": "#CCCCCC",
-                "PROGRESS_BORDER": "#9E9E9E",
-                "GRADIENT_START": "#757575",
-                "GRADIENT_END": "#212121",
-                "ARROW_RIGHT_PATH": "arrow_right_dark.png",
-                "SPLITTER_COLOR": "#CCCCCC"
-            },
-            "red": {
-                "MAIN_BG": "#1C0D11",
-                "PANEL_BG": "#2D151B",
-                "TEXT_COLOR": "#F9ECED",
-                "TEXT_LIGHT": "#FFFFFF",
-                "TEXT_MUTED": "#D4A3A9",
-                "BORDER_COLOR": "#4E232E",
-                "BORDER_COLOR_ALT": "#8A3B4E",
-                "BUTTON_BG": "#5E2633",
-                "BUTTON_HOVER_BG": "#7B3143",
-                "BUTTON_PRESSED_BG": "#3F1922",
-                "ACCENT_COLOR": "#E11D48",
-                "ACCENT_COLOR_DARK": "#BE123C",
-                "ACCENT_COLOR_DEEP": "#9F1239",
-                "PROGRESS_BG": "#2D151B",
-                "PROGRESS_BORDER": "#4E232E",
-                "GRADIENT_START": "#E11D48",
-                "GRADIENT_END": "#FDA4AF",
-                "ARROW_RIGHT_PATH": "arrow_right.png",
-                "SPLITTER_COLOR": "#4E232E"
-            },
-            "sunset": {
-                "MAIN_BG": "#101E2E",
-                "PANEL_BG": "#242F49",
-                "TEXT_COLOR": "#D1D5DB",
-                "TEXT_LIGHT": "#FFA586",
-                "TEXT_MUTED": "#8A9BB4",
-                "BORDER_COLOR": "#384358",
-                "BORDER_COLOR_ALT": "#5871A2",
-                "BUTTON_BG": "#3C4E70",
-                "BUTTON_HOVER_BG": "#4D638E",
-                "BUTTON_PRESSED_BG": "#2A374F",
-                "ACCENT_COLOR": "#B51A2B",
-                "ACCENT_COLOR_DARK": "#9A1624",
-                "ACCENT_COLOR_DEEP": "#541A2E",
-                "PROGRESS_BG": "#101E2E",
-                "PROGRESS_BORDER": "#384358",
-                "GRADIENT_START": "#FFA586",
-                "GRADIENT_END": "#B51A2B",
-                "ARROW_RIGHT_PATH": "arrow_right.png",
-                "SPLITTER_COLOR": "#384358"
-            },
-            "cyber": {
-                "MAIN_BG": "#0F0F0F",
-                "PANEL_BG": "#202020",
-                "TEXT_COLOR": "#D1D5DB",
-                "TEXT_LIGHT": "#F8F8F8",
-                "TEXT_MUTED": "#808080",
-                "BORDER_COLOR": "#337418",
-                "BORDER_COLOR_ALT": "#5DD62C",
-                "BUTTON_BG": "#265912",
-                "BUTTON_HOVER_BG": "#337418",
-                "BUTTON_PRESSED_BG": "#0F0F0F",
-                "ACCENT_COLOR": "#5DD62C",
-                "ACCENT_COLOR_DARK": "#4CB323",
-                "ACCENT_COLOR_DEEP": "#337418",
-                "PROGRESS_BG": "#0F0F0F",
-                "PROGRESS_BORDER": "#337418",
-                "GRADIENT_START": "#5DD62C",
-                "GRADIENT_END": "#337418",
-                "ARROW_RIGHT_PATH": "arrow_right.png",
-                "SPLITTER_COLOR": "#337418"
-            }
-        }
+        self.THEMES = THEMES
 
         # Загрузка путей и языка
         saved_input, saved_output, saved_lang, saved_theme = self.load_last_paths()
@@ -246,33 +140,32 @@ class DicomSplitterApp(QMainWindow):
             except Exception:
                 pass
 
-        self.update_thread = UpdateCheckerThread(self.VERSION)
-        self.update_thread.update_available.connect(self.on_update_available)
+        self.update_thread = UpdateCheckWorker(parent=self)
+        self.update_thread.finished.connect(self.on_update_checked)
         self.update_thread.start()
 
-    def on_update_available(self, new_version: str, release_url: str) -> None:
+    def on_update_checked(self, latest_version: str, release_url: str, assets: dict) -> None:
         """Показывает диалог предложения обновить программу при обнаружении новой версии."""
+        if not latest_version or not is_newer_version(self.VERSION, latest_version):
+            return
+
         config_file = self.get_config_path()
         if config_file.exists():
             try:
                 with open(config_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                    if data.get("skipped_version") == new_version:
+                    if data.get("skipped_version") == latest_version:
                         return
             except Exception:
                 pass
 
-        dialog = UpdateDialog(self, new_version)
+        dialog = UpdateDialog(self, latest_version)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             result = dialog.result_value
             if result == "yes":
-                import webbrowser
-                try:
-                    webbrowser.open(release_url)
-                except Exception:
-                    pass
+                run_auto_update(self, latest_version, assets)
             elif result == "skip":
-                self.save_skipped_version(new_version)
+                self.save_skipped_version(latest_version)
 
     def save_skipped_version(self, version: str) -> None:
         """Сохраняет версию, которую пользователь решил пропустить, в config.json."""
