@@ -22,3 +22,6 @@ problem_case/
 
 # Dynamically generated assets
 themes/*_theme.png
+
+# Agent workspace and docs
+.agent/
