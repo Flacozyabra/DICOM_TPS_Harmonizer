@@ -1,4 +1,5 @@
 import platform
+from typing import Tuple
 from PyQt6.QtWidgets import QWidget, QDialog
 
 THEMES = {
@@ -117,7 +118,7 @@ def hex_to_bgr(hex_color: str) -> int:
     return (b << 16) | (g << 8) | r
 
 
-def get_current_theme_palette(parent: QWidget = None) -> tuple[dict, str]:
+def get_current_theme_palette(parent: QWidget = None) -> Tuple[dict, str]:
     """Retrieves current active theme palette and name from widget hierarchy or top-level windows."""
     theme = "dark"
     p = parent
@@ -257,7 +258,7 @@ def get_dialog_stylesheet(palette: dict) -> str:
     """
 
 
-def apply_dialog_theme(dialog: QWidget, parent: QWidget = None) -> tuple[dict, str]:
+def apply_dialog_theme(dialog: QWidget, parent: QWidget = None) -> Tuple[dict, str]:
     """Applies theme stylesheet and Windows titlebar styling to a dialog window."""
     palette, theme = get_current_theme_palette(parent or dialog.parent())
     dialog.setStyleSheet(get_dialog_stylesheet(palette))

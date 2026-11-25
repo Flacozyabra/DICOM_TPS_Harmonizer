@@ -149,26 +149,61 @@ def get_clean_env() -> dict:
 
 
 def get_build_type() -> str:
-    """Determines whether running as frozen PyInstaller executable or from source."""
+    """Determines whether running from source or as legacy / pyqt5 / pyqt6 frozen executable."""
     if not hasattr(sys, "frozen"):
         return "source"
-    return "exe"
+
+    if sys.version_info[:2] == (3, 8):
+        return "legacy"
+
+    try:
+        from PyQt6.QtWidgets import QApplication
+        if "PyQt5" in QApplication.__module__:
+            return "legacy" if "legacy" in os.path.basename(sys.executable).lower() else "pyqt5"
+        return "pyqt6"
+    except Exception:
+        pass
+
+    exe_name = os.path.basename(sys.executable).lower()
+    if "legacy" in exe_name:
+        return "legacy"
+    if "pyqt5" in exe_name:
+        return "pyqt5"
+    return "pyqt6"
 
 
-def find_matching_asset(assets: dict, build_type: str = "exe", latest_version: str = "") -> tuple:
+def find_matching_asset(assets: dict, build_type: str = "pyqt6", latest_version: str = "") -> tuple:
     """Finds the matching executable asset from GitHub release assets dictionary."""
     if not assets:
         return None, None
 
-    # First check for matches with harmonizer or dicom in name
-    for name, url in assets.items():
-        name_lower = name.lower()
-        if name_lower.endswith(".exe") and any(k in name_lower for k in ("harmonizer", "dicom_tps")):
+    exe_assets = [(name, url) for name, url in assets.items() if name.lower().endswith(".exe")]
+
+    if build_type == "legacy":
+        for name, url in exe_assets:
+            if "legacy" in name.lower():
+                return name, url
+        return None, None
+
+    if build_type == "pyqt5":
+        for name, url in exe_assets:
+            nl = name.lower()
+            if "pyqt5" in nl and "legacy" not in nl:
+                return name, url
+        for name, url in exe_assets:
+            if "legacy" in name.lower():
+                return name, url
+        return None, None
+
+    # Modern PyQt6 build
+    for name, url in exe_assets:
+        nl = name.lower()
+        if "legacy" not in nl and "pyqt5" not in nl and any(k in nl for k in ("harmonizer", "dicom_tps", "pyqt6")):
             return name, url
 
-    # Fallback to any .exe asset
-    for name, url in assets.items():
-        if name.lower().endswith(".exe"):
+    for name, url in exe_assets:
+        nl = name.lower()
+        if "legacy" not in nl and "pyqt5" not in nl:
             return name, url
 
     return None, None

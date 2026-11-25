@@ -440,7 +440,12 @@ class DicomProcessor:
 
                     for fut in as_completed(futures):
                         if self.stop_event.is_set():
-                            executor.shutdown(wait=False, cancel_futures=True)
+                            if sys.version_info >= (3, 9):
+                                executor.shutdown(wait=False, cancel_futures=True)
+                            else:
+                                for pending_fut in futures:
+                                    pending_fut.cancel()
+                                executor.shutdown(wait=False)
                             self.logger.log(self.loc("log_stop_user"), "warning")
                             break
 

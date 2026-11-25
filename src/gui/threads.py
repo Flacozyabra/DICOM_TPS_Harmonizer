@@ -1,5 +1,6 @@
 import urllib.request
 import re
+from typing import Tuple
 from PyQt6.QtCore import QThread, pyqtSignal
 
 class UpdateCheckerThread(QThread):
@@ -28,7 +29,7 @@ class UpdateCheckerThread(QThread):
             pass
 
     def is_newer(self, latest: str, current: str) -> bool:
-        def parse_version(v: str) -> tuple[int, ...]:
+        def parse_version(v: str) -> Tuple[int, ...]:
             v_clean = re.sub(r'[^\d.]', '', v)
             parts = v_clean.split('.')
             while len(parts) < 3:

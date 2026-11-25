@@ -8,7 +8,7 @@ import urllib.request
 import re
 import math
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List, Tuple
 
 from PyQt6.QtCore import Qt, QObject, pyqtSignal, QSize, QPoint, QByteArray, QThread, QPointF, QRect, QEvent
 from PyQt6.QtWidgets import (
@@ -94,7 +94,7 @@ class DicomSplitterApp(QMainWindow):
         self.current_theme = saved_theme
         
         
-        self.translations: dict[str, str] = {}
+        self.translations: Dict[str, str] = {}
         self.load_locale(self.current_lang)
 
         # Переводим плейсхолдеры
@@ -211,13 +211,13 @@ class DicomSplitterApp(QMainWindow):
         config_dir.mkdir(parents=True, exist_ok=True)
         return config_dir / "config.json"
 
-    def generate_theme_arrows(self, color_right_hex: str, color_down_hex: str) -> tuple[str, str]:
+    def generate_theme_arrows(self, color_right_hex: str, color_down_hex: str) -> Tuple[str, str]:
         themes_dir = self.project_root / "themes"
         themes_dir.mkdir(exist_ok=True)
         path_right = themes_dir / "arrow_right_theme.png"
         path_down = themes_dir / "arrow_down_theme.png"
         try:
-            from PyQt6.QtGui import QPixmap, QPainter, QPen, QColor
+            from PyQt6.QtGui import QPixmap, QPainter, QPen, QColor, QPolygonF
             from PyQt6.QtCore import Qt, QPointF
             
             # Стрелка вправо
@@ -231,7 +231,7 @@ class DicomSplitterApp(QMainWindow):
             pen_r.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
             painter_r.setPen(pen_r)
             points_r = [QPointF(5.5, 3.5), QPointF(10.5, 8.0), QPointF(5.5, 12.5)]
-            painter_r.drawPolyline(points_r)
+            painter_r.drawPolyline(QPolygonF(points_r))
             painter_r.end()
             pixmap_right.save(str(path_right), "PNG")
             
@@ -246,7 +246,7 @@ class DicomSplitterApp(QMainWindow):
             pen_d.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
             painter_d.setPen(pen_d)
             points_d = [QPointF(3.5, 5.5), QPointF(8.0, 10.5), QPointF(12.5, 5.5)]
-            painter_d.drawPolyline(points_d)
+            painter_d.drawPolyline(QPolygonF(points_d))
             painter_d.end()
             pixmap_down.save(str(path_down), "PNG")
         except Exception:
@@ -266,7 +266,7 @@ class DicomSplitterApp(QMainWindow):
         self.save_last_paths()
         set_dark_titlebar(self)
 
-    def load_last_paths(self) -> tuple[str, str, str, str]:
+    def load_last_paths(self) -> Tuple[str, str, str, str]:
         config_file = self.get_config_path()
         inp = "Введите путь для папки Dicom_input"
         out = "Введите путь для папки Dicom_output"
@@ -1309,7 +1309,7 @@ class DicomSplitterApp(QMainWindow):
             else:
                 self.open_viewer(s_uid, seg_idx, files)
 
-    def open_viewer(self, s_uid: str, seg_idx: int, files: list[str]) -> None:
+    def open_viewer(self, s_uid: str, seg_idx: int, files: List[str]) -> None:
         """Переключает правую панель на вьюер и загружает серию."""
         self.viewer_active = True
         self.current_view_series_uid = s_uid

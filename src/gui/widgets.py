@@ -1,6 +1,7 @@
 import math
 import io
 from pathlib import Path
+from typing import List, Optional, Tuple
 import numpy as np
 import pydicom
 
@@ -491,7 +492,7 @@ class DicomViewerWidget(QWidget):
             elif delta < 0:
                 self.slice_scrolled.emit(1)
 
-    def to_image_coords(self, pt: QPointF) -> tuple[float, float]:
+    def to_image_coords(self, pt: QPointF) -> Tuple[float, float]:
         if not self.image_rect or not self.current_pixmap:
             return 0.0, 0.0
 
@@ -1132,7 +1133,7 @@ class DicomViewerPanel(QWidget):
                 self.hu_panel.hide()
         self.update_buttons_style()
 
-    def load_series(self, files: list[str]) -> None:
+    def load_series(self, files: List[str]) -> None:
         import pydicom
         self.is_loading = True
         self.sorted_files = []
@@ -1391,7 +1392,7 @@ class DicomViewerPanel(QWidget):
 
         self.on_window_changed(self.window_width, self.window_center)
 
-    def dicom_to_pixmap(self, ds, window_width: float, window_center: float, frame_idx: int = 0) -> QPixmap | None:
+    def dicom_to_pixmap(self, ds, window_width: float, window_center: float, frame_idx: int = 0) -> Optional[QPixmap]:
         try:
             import numpy as np
             if not hasattr(ds, "pixel_array"):
