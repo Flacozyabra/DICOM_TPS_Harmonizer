@@ -36,7 +36,13 @@
 * **Мультиязычность:** Встроенная поддержка русского и английского языков для интерфейса и логов процессора.
 
 ### Использование готовой сборки
-Вы можете скачать уже собранный исполняемый файл `.exe` для Windows из раздела [Releases](https://github.com/Flacozyabra/DICOM_TPS_Harmonizer/releases) на GitHub. Он не требует установки Python или каких-либо зависимостей, но для его работы требуется установленная MS VC++ Runtime (Visual Studio 2015-2022).
+Вы можете скачать уже собранный исполняемый файл `.exe` для Windows из раздела [Releases](https://github.com/Flacozyabra/DICOM_TPS_Harmonizer/releases) на GitHub:
+* **`DICOM_TPS_Harmonizer.exe`** (Основная редакция — рекомендуется для Windows 10 1903+ / 11, Python 3.12 + `PyQt6`). Требует установленный пакет MS VC++ Runtime (Visual Studio 2015–2022 x64).
+* **`DICOM_TPS_Harmonizer_Legacy.exe`** (Совместимая редакция — для Windows 7 / 8.1 и старых сборок Windows 10 LTSC, Python 3.8 + `PyQt5`).
+
+### Сборка EXE из исходников
+* **Основная редакция (`DICOM_TPS_Harmonizer.exe`):** `python build_PyQt6.py` (Python 3.10+ и `PyQt6`)
+* **Совместимая редакция (`DICOM_TPS_Harmonizer_Legacy.exe`):** `python build_PyQt5_Legacy.py` (для поддержки Windows 7 сборку необходимо выполнять на Python 3.8 и `PyQt5`)
 
 ### Быстрый запуск из исходников (Windows)
 Просто запустите файл [run.bat](run.bat) в корневой папке проекта. Он автоматически активирует виртуальное окружение и запустит программу.
@@ -65,7 +71,13 @@
 * **Multi-language support:** Built-in Russian and English localizations for both GUI and execution logs.
 
 ### Using pre-built binaries
-You can download the compiled standalone `.exe` for Windows from the [Releases](https://github.com/Flacozyabra/DICOM_TPS_Harmonizer/releases) section. No Python installation or manual dependencies configuration is required.
+You can download the compiled standalone `.exe` for Windows from the [Releases](https://github.com/Flacozyabra/DICOM_TPS_Harmonizer/releases) section:
+* **`DICOM_TPS_Harmonizer.exe`** (Modern Edition — recommended for Windows 10 1903+ / 11, Python 3.12 + `PyQt6`). Requires MS VC++ Runtime (Visual Studio 2015–2022 x64).
+* **`DICOM_TPS_Harmonizer_Legacy.exe`** (Compatibility Edition — for Windows 7 / 8.1 and legacy Windows 10 LTSC builds, Python 3.8 + `PyQt5`).
+
+### Building EXE from source
+* **Modern Edition (`DICOM_TPS_Harmonizer.exe`):** `python build_PyQt6.py` (Python 3.10+ with `PyQt6`)
+* **Legacy Edition (`DICOM_TPS_Harmonizer_Legacy.exe`):** `python build_PyQt5_Legacy.py` (use Python 3.8 with `PyQt5` for full Windows 7 support)
 
 ### Quick Start from source (Windows)
 Double-click [run.bat](run.bat) in the project folder. It will configure the virtual environment and start the application automatically.

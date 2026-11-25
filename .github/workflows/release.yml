@@ -9,44 +9,125 @@ permissions:
   contents: write
 
 jobs:
-  build-and-release:
+  # ── Job 1: Modern build (Python 3.12) — PyQt6 ─────────────────────────────
+  build-modern:
+    name: Build Modern (Python 3.12 / PyQt6)
     runs-on: windows-latest
+    env:
+      PYTHONIOENCODING: utf-8
+      PYTHONUTF8: "1"
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
           cache: 'pip'
 
       - name: Install dependencies
+        shell: bash
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pyinstaller
+          pip install -r requirements.txt pyinstaller
 
-      - name: Build EXE with PyInstaller
-        run: |
-          pyinstaller main.spec
+      - name: Build PyQt6 executable
+        shell: bash
+        run: python build_PyQt6.py
 
-      - name: Verify build output
+      - name: Verify modern build output
         shell: pwsh
         run: |
-          $exe = Get-ChildItem "dist/DICOM_TPS_Harmonizer*.exe" | Select-Object -First 1
+          $exe = Get-ChildItem "dist/DICOM_TPS_Harmonizer.exe" | Select-Object -First 1
           if ($exe -and $exe.Exists) {
-            Write-Host "Executable built successfully: $($exe.FullName)"
+            Write-Host "Modern executable built successfully: $($exe.FullName)"
           } else {
-            Write-Error "Executable not found in dist/ folder."
+            Write-Error "DICOM_TPS_Harmonizer.exe not found in dist/ folder."
             exit 1
           }
 
-      - name: Create Release and Upload Asset
+      - name: Upload modern build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-modern
+          path: dist/DICOM_TPS_Harmonizer.exe
+          retention-days: 1
+
+  # ── Job 2: Legacy build (Python 3.8.10) — PyQt5 / Legacy Windows ──────────
+  build-legacy:
+    name: Build Legacy (Python 3.8.10 / PyQt5)
+    runs-on: windows-latest
+    env:
+      PYTHONIOENCODING: utf-8
+      PYTHONUTF8: "1"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.8.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.8.10'
+          architecture: 'x64'
+          cache: 'pip'
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install "pydicom>=2.4.0" "numpy>=1.20.0" PyQt5 pylibjpeg pylibjpeg-libjpeg pylibjpeg-openjpeg "Pillow>=10.0.0" pyinstaller
+
+      - name: Build PyQt5 Legacy executable
+        shell: bash
+        run: python build_PyQt5_Legacy.py
+
+      - name: Verify legacy build output
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem "dist/DICOM_TPS_Harmonizer_Legacy.exe" | Select-Object -First 1
+          if ($exe -and $exe.Exists) {
+            Write-Host "Legacy executable built successfully: $($exe.FullName)"
+          } else {
+            Write-Error "DICOM_TPS_Harmonizer_Legacy.exe not found in dist/ folder."
+            exit 1
+          }
+
+      - name: Upload legacy build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-legacy
+          path: dist/DICOM_TPS_Harmonizer_Legacy.exe
+          retention-days: 1
+
+  # ── Job 3: Publish — collect both EXEs and create GitHub Release ──────────
+  release:
+    name: Publish GitHub Release
+    needs: [build-modern, build-legacy]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download modern build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-modern
+          path: dist/
+
+      - name: Download legacy build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-legacy
+          path: dist/
+
+      - name: List artifacts
+        run: ls -lh dist/
+
+      - name: Create Release and Upload Assets
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/DICOM_TPS_Harmonizer*.exe
+          files: dist/*.exe
           draft: false
           prerelease: false
           generate_release_notes: true
