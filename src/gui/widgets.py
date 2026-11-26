@@ -141,6 +141,18 @@ class HUVerticalSlider(QWidget):
         self.setMinimumWidth(60)
         self.setMouseTracking(True)
 
+    def set_range(self, min_hu: float, max_hu: float) -> None:
+        """Update the slider bounds while keeping active handles within range."""
+        if max_hu <= min_hu:
+            max_hu = min_hu + 100.0
+        self.min_hu = float(min_hu)
+        self.max_hu = float(max_hu)
+        self.lower_val = max(self.min_hu, min(self.max_hu, self.lower_val))
+        self.upper_val = max(self.min_hu, min(self.max_hu, self.upper_val))
+        if self.upper_val - self.lower_val < 1.0:
+            self.upper_val = min(self.max_hu, self.lower_val + 1.0)
+        self.update()
+
     def set_values(self, lower: float, upper: float) -> None:
         lower = max(self.min_hu, min(self.max_hu, lower))
         upper = max(self.min_hu, min(self.max_hu, upper))
@@ -211,12 +223,22 @@ class HUVerticalSlider(QWidget):
         font.setPointSize(8)
         painter.setFont(font)
         
-        for hu in range(int(self.min_hu), int(self.max_hu) + 1, 500):
+        span = max(1.0, self.max_hu - self.min_hu)
+        if span <= 4500:
+            minor_step, major_step = 500, 1000
+        elif span <= 15000:
+            minor_step, major_step = 1000, 2000
+        else:
+            minor_step, major_step = 2500, 5000
+
+        start_tick = int(math.ceil(self.min_hu / minor_step) * minor_step)
+        end_tick = int(math.floor(self.max_hu / minor_step) * minor_step)
+        for hu in range(start_tick, end_tick + 1, minor_step):
             y_tick = self._hu_to_y(hu)
             painter.drawLine(cx - self.bar_width // 2 - 2, y_tick, cx - self.bar_width // 2, y_tick)
-            
-            # Подписи (каждые 1000 HU)
-            if hu % 1000 == 0:
+
+            # Подписи (каждые major_step)
+            if hu % major_step == 0:
                 painter.setPen(QPen(QColor("#9CA3AF"), 1))
                 painter.drawText(cx + self.bar_width // 2 + 5, y_tick + 3, str(hu))
                 painter.setPen(QPen(QColor("#4B5563"), 1))
@@ -1134,7 +1156,10 @@ class DicomViewerPanel(QWidget):
         self.update_buttons_style()
 
     def load_series(self, files: List[str]) -> None:
-        import pydicom
+        from src.core.converter import extract_multiframe_frames
+        from src.core.recovery import safe_dcmread
+        from src.utils.helpers import as_floats, compute_slice_location
+
         self.is_loading = True
         self.sorted_files = []
         self.current_index = -1
@@ -1148,22 +1173,37 @@ class DicomViewerPanel(QWidget):
         slices = []
         for f in files:
             try:
-                # Быстрое сканирование тегов для сортировки
-                ds = pydicom.dcmread(f, stop_before_pixels=True)
-                
+                # Быстрое сканирование тегов для сортировки (с поддержкой Siemens EOF Fix)
+                ds = safe_dcmread(Path(f), stop_before_pixels=True)
+
                 # Пропускаем файлы без пикселей (отчеты, презентационные состояния и т.д.)
                 if 'Rows' not in ds or 'Columns' not in ds:
                     continue
-                
-                ipp = getattr(ds, "ImagePositionPatient", None)
-                z_coord = float(ipp[2]) if ipp and len(ipp) >= 3 else 0.0
-                instance_number = int(getattr(ds, "InstanceNumber", 0))
-                
-                n_frames = int(getattr(ds, "NumberOfFrames", 1))
+
+                instance_number = int(getattr(ds, "InstanceNumber", 0) or 0)
+                n_frames = int(getattr(ds, "NumberOfFrames", 1) or 1)
+
                 if n_frames > 1:
-                    for frame_idx in range(n_frames):
-                        slices.append((f, frame_idx, z_coord, instance_number))
+                    frames_meta, _ = extract_multiframe_frames(ds)
+                    for fm in frames_meta:
+                        if fm.slice_location is not None:
+                            z_coord = float(fm.slice_location)
+                        elif fm.position is not None and len(fm.position) >= 3:
+                            z_coord = float(fm.position[2])
+                        else:
+                            z_coord = float(fm.index)
+                        order_num = fm.in_stack_position if fm.in_stack_position is not None else instance_number
+                        slices.append((f, fm.index, z_coord, order_num))
                 else:
+                    ipp = as_floats(getattr(ds, "ImagePositionPatient", None))
+                    ori = as_floats(getattr(ds, "ImageOrientationPatient", None))
+                    sl = compute_slice_location(ipp, ori) if (ipp and ori) else None
+                    if sl is not None:
+                        z_coord = float(sl)
+                    elif ipp and len(ipp) >= 3:
+                        z_coord = float(ipp[2])
+                    else:
+                        z_coord = 0.0
                     slices.append((f, 0, z_coord, instance_number))
             except Exception:
                 pass
@@ -1180,71 +1220,79 @@ class DicomViewerPanel(QWidget):
 
         self.slider.setRange(0, len(self.sorted_files) - 1)
         self.is_loading = False
-        
+
         self.set_current_slice(0)
 
     def read_truncated_dicom(self, filepath: str):
-        import pydicom
-        import io
-        import numpy as np
-        
         # Сначала читаем метаданные с stop_before_pixels=True, чтобы узнать Transfer Syntax и размер
-        ds_meta = pydicom.dcmread(filepath, stop_before_pixels=True)
-        transfer_syntax = ds_meta.file_meta.TransferSyntaxUID
-        
+        ds_meta = pydicom.dcmread(filepath, stop_before_pixels=True, force=True)
+        file_meta = getattr(ds_meta, "file_meta", None)
+        transfer_syntax = getattr(file_meta, "TransferSyntaxUID", None) if file_meta is not None else None
+
         with open(filepath, "rb") as f:
             file_bytes = bytearray(f.read())
-            
-        # Определяем, сжатый ли формат пикселей
-        is_compressed = transfer_syntax.startswith("1.2.840.10008.1.2.4.") or "rle" in getattr(ds_meta.file_meta, "TransferSyntaxUID_name", "").lower()
-        
+
+        ts_str = str(transfer_syntax) if transfer_syntax is not None else ""
+        ts_name = getattr(transfer_syntax, "name", "").lower() if transfer_syntax is not None else ""
+        is_compressed = (
+            bool(getattr(transfer_syntax, "is_compressed", False))
+            or ts_str.startswith("1.2.840.10008.1.2.4.")
+            or "rle" in ts_name
+        )
+
         if is_compressed:
             # Ищем маркер конца JPEG (FF D9) в конце файла
             has_eoi = file_bytes.endswith(b"\xff\xd9") or b"\xff\xd9" in file_bytes[-20:]
             if not has_eoi:
                 file_bytes.extend(b"\xff\xd9")
-                
+
             # Добавим Sequence Delimiter (FE FF DD E0 00 00 00 00), если его нет в конце
             has_delim = b"\xfe\xff\xdd\xe0" in file_bytes[-20:]
             if not has_delim:
                 file_bytes.extend(b"\xfe\xff\xdd\xe0\x00\x00\x00\x00")
         else:
-            # Несжатые пиксели - дополняем нулями до ожидаемого размера
-            rows = getattr(ds_meta, "Rows", 512)
-            cols = getattr(ds_meta, "Columns", 512)
-            bits = getattr(ds_meta, "BitsAllocated", 16)
-            expected_pixels = rows * cols * (bits // 8)
-            if len(file_bytes) < expected_pixels:
-                file_bytes.extend(b"\x00" * (expected_pixels * 2))
-                
+            # Несжатые пиксели - дополняем нулями, только если реальная длина PixelData меньше ожидаемой
+            rows = int(getattr(ds_meta, "Rows", 512) or 512)
+            cols = int(getattr(ds_meta, "Columns", 512) or 512)
+            bits = int(getattr(ds_meta, "BitsAllocated", 16) or 16)
+            samples = int(getattr(ds_meta, "SamplesPerPixel", 1) or 1)
+            n_frames = int(getattr(ds_meta, "NumberOfFrames", 1) or 1)
+            expected_pixels = rows * cols * samples * n_frames * max(1, bits // 8)
+            try:
+                ds_raw = pydicom.dcmread(io.BytesIO(bytes(file_bytes)), force=True)
+                raw_pixels = getattr(ds_raw, "PixelData", b"")
+                if len(raw_pixels) < expected_pixels:
+                    file_bytes.extend(b"\x00" * (expected_pixels - len(raw_pixels)))
+            except Exception:
+                if len(file_bytes) < expected_pixels:
+                    file_bytes.extend(b"\x00" * (expected_pixels - len(file_bytes)))
+
         # Читаем из BytesIO
         bio = io.BytesIO(file_bytes)
-        ds = pydicom.dcmread(bio)
-        
-        # Чтобы убедиться, что при обращении к pixel_array не упадет, пробуем прочесть его.
-        # Если упадет (например, JPEG данные повреждены внутри), подкладываем черный кадр.
+        ds = pydicom.dcmread(bio, force=True)
+
+        # Если обращение к pixel_array все равно падает, подкладываем черный кадр
         try:
             _ = ds.pixel_array
         except Exception:
-            rows = getattr(ds, "Rows", 512)
-            cols = getattr(ds, "Columns", 512)
-            bits = getattr(ds, "BitsAllocated", 16)
-            pixel_repr = getattr(ds, "PixelRepresentation", 0)
+            rows = int(getattr(ds, "Rows", 512) or 512)
+            cols = int(getattr(ds, "Columns", 512) or 512)
+            bits = int(getattr(ds, "BitsAllocated", 16) or 16)
+            pixel_repr = int(getattr(ds, "PixelRepresentation", 0) or 0)
             if bits == 16:
                 dtype = np.int16 if pixel_repr == 1 else np.uint16
             else:
                 dtype = np.int8 if pixel_repr == 1 else np.uint8
             arr = np.zeros((rows, cols), dtype=dtype)
-            
-            # Динамически переопределяем класс для этого конкретного экземпляра
+
             class TruncatedDataset(type(ds)):
                 @property
                 def pixel_array(self):
                     return getattr(self, "_pixel_array", None)
-            
+
             ds._pixel_array = arr
             ds.__class__ = TruncatedDataset
-            
+
         return ds
 
     def set_current_slice(self, index: int) -> None:
@@ -1255,15 +1303,14 @@ class DicomViewerPanel(QWidget):
         self.slider.setValue(index)
 
         filepath, frame_idx = self.sorted_files[index]
-        import pydicom
+        from src.core.recovery import safe_dcmread
         try:
-            # Читаем файл. Сначала пробуем обычное чтение.
+            # Читаем файл с поддержкой Siemens EOF Fix и fallback для усеченных файлов
             try:
-                ds = pydicom.dcmread(filepath)
+                ds = safe_dcmread(Path(filepath), stop_before_pixels=False)
                 if not hasattr(ds, "pixel_array") or len(ds) == 0:
                     raise ValueError("Empty dataset or missing pixel array")
             except Exception:
-                # Если обычное чтение упало, пробуем восстановить частично поврежденный файл
                 ds = self.read_truncated_dicom(filepath)
 
             # Извлекаем параметры окна по умолчанию при первой загрузке серии
@@ -1274,24 +1321,42 @@ class DicomViewerPanel(QWidget):
                 ww = getattr(ds, "WindowWidth", None)
                 if wc is not None and ww is not None:
                     try:
-                        c_val = wc[0] if hasattr(wc, "__iter__") else wc
-                        w_val = ww[0] if hasattr(ww, "__iter__") else ww
+                        c_val = wc[0] if hasattr(wc, "__iter__") and not isinstance(wc, (str, bytes)) else wc
+                        w_val = ww[0] if hasattr(ww, "__iter__") and not isinstance(ww, (str, bytes)) else ww
                         self.default_wc = float(c_val)
-                        self.default_ww = float(w_val)
+                        self.default_ww = max(1.0, float(w_val))
                     except Exception:
                         pass
-                
+
                 # При первом запуске серии используем DICOM пресет
                 preset_data = self.cb_presets.currentData()
                 if preset_data == "dicom":
                     self.window_center = self.default_wc
                     self.window_width = self.default_ww
 
+                lower = self.window_center - self.window_width / 2.0
+                upper = self.window_center + self.window_width / 2.0
+                min_bound = min(-1000.0, lower)
+                max_bound = max(3000.0, upper)
+                if getattr(ds, "Modality", "") != "CT":
+                    try:
+                        px = ds.pixel_array
+                        max_bound = max(max_bound, float(np.max(px)))
+                    except Exception:
+                        pass
+                if hasattr(self, "hu_slider"):
+                    self.hu_slider.blockSignals(True)
+                    self.hu_slider.set_range(min_bound, max_bound)
+                    self.hu_slider.set_values(lower, upper)
+                    self.hu_slider.blockSignals(False)
+                    self.lbl_upper_hu.setText(f"{int(upper)} HU")
+                    self.lbl_lower_hu.setText(f"{int(lower)} HU")
+
             pat_name = getattr(ds, "PatientName", "Unknown")
             pat_id = getattr(ds, "PatientID", "Unknown")
             study_desc = getattr(ds, "StudyDescription", "")
             series_desc = getattr(ds, "SeriesDescription", "")
-            
+
             info_text = f"{pat_name} [{pat_id}] | {study_desc} | {series_desc}"
             self.lbl_info.setText(info_text)
             self.viewer.set_slice_info(index + 1, len(self.sorted_files))
@@ -1302,7 +1367,7 @@ class DicomViewerPanel(QWidget):
                 self.viewer.set_window_params(self.window_width, self.window_center)
             else:
                 raise ValueError("Failed to decode pixel array to pixmap")
-                
+
         except Exception as e:
             # Автоматическая защита от битых файлов: выбрасываем его из списка и пробуем открыть тот же индекс
             print(f"[Viewer] Skipping corrupted file {filepath}: {str(e)}")
@@ -1339,20 +1404,30 @@ class DicomViewerPanel(QWidget):
         if hasattr(self, "hu_panel") and hasattr(self, "hu_slider"):
             lower = center - width / 2.0
             upper = center + width / 2.0
-            
+
+            if lower < self.hu_slider.min_hu or upper > self.hu_slider.max_hu:
+                self.hu_slider.set_range(
+                    min(self.hu_slider.min_hu, lower),
+                    max(self.hu_slider.max_hu, upper),
+                )
+
             self.hu_slider.blockSignals(True)
             self.hu_slider.set_values(lower, upper)
             self.hu_slider.blockSignals(False)
-            
+
             self.lbl_upper_hu.setText(f"{int(upper)} HU")
             self.lbl_lower_hu.setText(f"{int(lower)} HU")
-            
+
         self.update_current_slice_pixels()
 
     def update_current_slice_pixels(self) -> None:
+        frame_idx = 0
+        if 0 <= self.current_index < len(self.sorted_files):
+            _, frame_idx = self.sorted_files[self.current_index]
+
         ds = self.viewer.current_dataset
         if ds is not None:
-            pixmap = self.dicom_to_pixmap(ds, self.window_width, self.window_center)
+            pixmap = self.dicom_to_pixmap(ds, self.window_width, self.window_center, frame_idx)
             if pixmap:
                 self.viewer.set_dicom_image(pixmap, ds)
                 self.viewer.set_window_params(self.window_width, self.window_center)
@@ -1360,11 +1435,14 @@ class DicomViewerPanel(QWidget):
 
         if self.current_index < 0 or self.current_index >= len(self.sorted_files):
             return
-        filepath = self.sorted_files[self.current_index]
-        import pydicom
+        filepath, frame_idx = self.sorted_files[self.current_index]
+        from src.core.recovery import safe_dcmread
         try:
-            ds = pydicom.dcmread(filepath)
-            pixmap = self.dicom_to_pixmap(ds, self.window_width, self.window_center)
+            try:
+                ds = safe_dcmread(Path(filepath), stop_before_pixels=False)
+            except Exception:
+                ds = self.read_truncated_dicom(filepath)
+            pixmap = self.dicom_to_pixmap(ds, self.window_width, self.window_center, frame_idx)
             if pixmap:
                 self.viewer.set_dicom_image(pixmap, ds)
                 self.viewer.set_window_params(self.window_width, self.window_center)
@@ -1394,11 +1472,10 @@ class DicomViewerPanel(QWidget):
 
     def dicom_to_pixmap(self, ds, window_width: float, window_center: float, frame_idx: int = 0) -> Optional[QPixmap]:
         try:
-            import numpy as np
             if not hasattr(ds, "pixel_array"):
                 return None
 
-            original_ts = getattr(ds.file_meta, "TransferSyntaxUID", None)
+            original_ts = getattr(ds.file_meta, "TransferSyntaxUID", None) if hasattr(ds, "file_meta") else None
             if original_ts and not hasattr(ds, "original_transfer_syntax"):
                 ds.original_transfer_syntax = original_ts
 
@@ -1407,7 +1484,18 @@ class DicomViewerPanel(QWidget):
             except Exception:
                 pass
 
-            arr = ds.pixel_array.astype(float)
+            raw_arr = ds.pixel_array
+            samples = int(getattr(ds, "SamplesPerPixel", 1) or 1)
+            if samples == 3:
+                if raw_arr.ndim == 4:
+                    raw_arr = raw_arr[frame_idx]
+                rgb_arr = np.ascontiguousarray(raw_arr, dtype=np.uint8)
+                height, width, _ = rgb_arr.shape
+                self._temp_arr = rgb_arr
+                qimg = QImage(self._temp_arr.data, width, height, width * 3, QImage.Format.Format_RGB888)
+                return QPixmap.fromImage(qimg)
+
+            arr = raw_arr.astype(float)
             if len(arr.shape) == 3:
                 arr = arr[frame_idx]
             elif len(arr.shape) == 4:
@@ -1416,8 +1504,9 @@ class DicomViewerPanel(QWidget):
             intercept = float(getattr(ds, "RescaleIntercept", 0.0))
             arr = arr * slope + intercept
 
-            min_val = window_center - window_width / 2.0
-            max_val = window_center + window_width / 2.0
+            safe_width = max(1.0, float(window_width))
+            min_val = window_center - safe_width / 2.0
+            max_val = window_center + safe_width / 2.0
 
             arr = np.clip(arr, min_val, max_val)
             arr = ((arr - min_val) / (max_val - min_val) * 255.0).astype(np.uint8)

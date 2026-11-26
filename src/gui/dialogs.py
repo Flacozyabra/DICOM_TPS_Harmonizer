@@ -3,7 +3,8 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QDialog, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QProgressBar, QGridLayout
 )
-from src.gui.styles import set_dark_titlebar
+from src.gui.styles import apply_dialog_theme, set_window_titlebar_theme
+
 
 class CustomQuestionDialog(QDialog):
     """Кастомный диалог с вопросом о создании папок и тремя кнопками выбора."""
@@ -11,12 +12,15 @@ class CustomQuestionDialog(QDialog):
     def __init__(self, parent: QWidget, title: str, message: str) -> None:
         super().__init__(parent)
         self.setWindowTitle(title)
-        self.setFixedSize(400, 150)
+        self.setMinimumWidth(420)
         self.setModal(True)
         self.result_value = None
 
+        apply_dialog_theme(self, parent)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(14)
 
         lbl = QLabel(message, self)
         lbl.setWordWrap(True)
@@ -33,6 +37,7 @@ class CustomQuestionDialog(QDialog):
         text_both = parent.loc("create_both")
 
         btn_yes = QPushButton(text_yes, self)
+        btn_yes.setObjectName("primaryBtn")
         btn_yes.clicked.connect(lambda: self.finish("yes"))
         btn_layout.addWidget(btn_yes)
 
@@ -52,10 +57,7 @@ class CustomQuestionDialog(QDialog):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        set_dark_titlebar(self)
-
-
-from src.gui.styles import set_dark_titlebar, apply_dialog_theme, set_window_titlebar_theme
+        set_window_titlebar_theme(self)
 
 
 class UpdateDialog(QDialog):
@@ -124,8 +126,10 @@ class PatientEditDialog(QDialog):
         super().__init__(parent)
         self.parent = parent
         self.setWindowTitle(parent.loc("dialog_patient_info"))
-        self.setFixedSize(420, 260)
+        self.setMinimumWidth(420)
         self.setModal(True)
+
+        apply_dialog_theme(self, parent)
 
         self.new_name = current_name
         self.new_id = current_id
@@ -133,6 +137,7 @@ class PatientEditDialog(QDialog):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
 
         lbl_msg = QLabel(parent.loc("dialog_patient_message"), self)
         lbl_msg.setWordWrap(True)
@@ -161,13 +166,12 @@ class PatientEditDialog(QDialog):
         btn_layout.setSpacing(15)
 
         btn_save = QPushButton(parent.loc("dialog_save"), self)
+        btn_save.setObjectName("primaryBtn")
         btn_save.clicked.connect(self.on_save)
-        btn_save.setStyleSheet("background-color: #2563EB; color: white; font-weight: bold;")
         btn_layout.addWidget(btn_save)
 
         btn_skip = QPushButton(parent.loc("no"), self)
         btn_skip.clicked.connect(self.on_skip)
-        btn_skip.setStyleSheet("background-color: #4B5563; color: white;")
         btn_layout.addWidget(btn_skip)
 
         layout.addLayout(btn_layout)
@@ -183,7 +187,7 @@ class PatientEditDialog(QDialog):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        set_dark_titlebar(self)
+        set_window_titlebar_theme(self)
 
 
 class ScanProgressDialog(QDialog):
@@ -194,11 +198,14 @@ class ScanProgressDialog(QDialog):
         self.parent = parent
         self.stop_event = stop_event
         self.setWindowTitle(parent.loc("dialog_scan_title"))
-        self.setFixedSize(380, 150)
+        self.setMinimumWidth(380)
         self.setModal(True)
+
+        apply_dialog_theme(self, parent)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
 
         self.lbl_status = QLabel(parent.loc("dialog_scan_finding"), self)
         self.lbl_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -213,7 +220,7 @@ class ScanProgressDialog(QDialog):
 
         self.btn_cancel = QPushButton(parent.loc("dialog_scan_cancel"), self)
         self.btn_cancel.clicked.connect(self.on_cancel)
-        self.btn_cancel.setStyleSheet("background-color: #4B5563; color: white; min-width: 100px;")
+        self.btn_cancel.setStyleSheet("min-width: 100px;")
         layout.addWidget(self.btn_cancel, alignment=Qt.AlignmentFlag.AlignCenter)
 
     def update_progress(self, current: int, total: int) -> None:
@@ -231,4 +238,4 @@ class ScanProgressDialog(QDialog):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        set_dark_titlebar(self)
+        set_window_titlebar_theme(self)
