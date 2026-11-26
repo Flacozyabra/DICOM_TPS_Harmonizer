@@ -5,7 +5,7 @@ from pathlib import Path
 import sys
 import threading
 import traceback
-from typing import Any, Dict, List, Set, Union
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 
 import numpy as np
@@ -14,13 +14,15 @@ from pydicom.uid import generate_uid
 
 from src.core.config import ProcessingConfig
 from src.core.converter import (
+    MultiframeFrameMeta,
     clean_and_build_dataset,
     clean_and_build_dataset_inplace,
     copy_geometry_and_rescale,
+    extract_multiframe_frames,
     save_dicom_file,
 )
 from src.core.recovery import safe_dcmread
-from src.utils.helpers import make_safe_filename
+from src.utils.helpers import as_int, make_safe_filename
 from src.utils.logger import BaseLogger
 
 # Маппинг модальностей в стандартные SOP Class UID для Monaco и Aria
@@ -33,6 +35,159 @@ SOP_CLASS_MAPPING = {
 DEFAULT_SOP_CLASS = '1.2.840.10008.5.1.4.1.1.7'  # Secondary Capture Image Storage
 
 
+def _build_subseries_labels(
+    group_frames: List[MultiframeFrameMeta],
+    group_idx: int,
+    used_folder_suffixes: Set[str],
+    has_multiple_temporal: bool,
+) -> Tuple[str, str]:
+    """Build human-readable SeriesDescription suffix and filesystem-safe folder suffix."""
+    first = group_frames[0]
+    desc_parts: List[str] = []
+    folder_parts: List[str] = []
+
+    if first.stack_id:
+        desc_parts.append(f"stack {first.stack_id}")
+        folder_parts.append(f"Stack{make_safe_filename(first.stack_id)}")
+    if first.echo_numbers:
+        desc_parts.append(f"echo {first.echo_numbers}")
+        folder_parts.append(f"Echo{make_safe_filename(first.echo_numbers)}")
+    if first.temporal_index is not None and (has_multiple_temporal or first.temporal_index > 1):
+        desc_parts.append(f"t{first.temporal_index}")
+        folder_parts.append(f"T{first.temporal_index}")
+    if first.b_value is not None:
+        b_str = str(int(first.b_value)) if float(first.b_value).is_integer() else str(first.b_value)
+        desc_parts.append(f"b{b_str}")
+        folder_parts.append(f"b{make_safe_filename(b_str)}")
+
+    folder_suffix = "_".join(folder_parts)
+    if not folder_suffix or folder_suffix in used_folder_suffixes:
+        seg_label = f"Seg{group_idx + 1}"
+        folder_suffix = f"{folder_suffix}_{seg_label}" if folder_suffix else seg_label
+        desc_parts.append(f"seg {group_idx + 1}")
+
+    used_folder_suffixes.add(folder_suffix)
+    desc_suffix = ", ".join(desc_parts) if desc_parts else f"series {group_idx + 1}"
+    return desc_suffix, folder_suffix
+
+
+def _group_multiframe_frames(
+    frames_meta: List[MultiframeFrameMeta],
+    split_series: bool,
+) -> List[List[MultiframeFrameMeta]]:
+    """Group and sort multiframe metadata into one or more subseries."""
+    if not frames_meta:
+        return []
+    if not split_series:
+        return [list(frames_meta)]
+
+    groups_dict: Dict[Tuple[Any, ...], List[MultiframeFrameMeta]] = {}
+    for frame in frames_meta:
+        groups_dict.setdefault(frame.group_key(), []).append(frame)
+
+    groups = list(groups_dict.values())
+
+    def _group_sort_key(group: List[MultiframeFrameMeta]) -> Tuple[Any, ...]:
+        first = group[0]
+        ori_str = str(tuple(round(v, 4) for v in first.orientation)) if first.orientation else ""
+        return (
+            first.stack_id or "",
+            first.temporal_index if first.temporal_index is not None else 0,
+            first.echo_numbers or "",
+            first.b_value if first.b_value is not None else -1.0,
+            first.frame_type or (),
+            ori_str,
+        )
+
+    groups.sort(key=_group_sort_key)
+    for group in groups:
+        group.sort(
+            key=lambda f: (
+                f.in_stack_position if f.in_stack_position is not None else 0,
+                f.slice_location if f.slice_location is not None else 0.0,
+                f.index,
+            )
+        )
+    return groups
+
+
+def _check_dataset_pixel_integrity(ds: pydicom.Dataset) -> Optional[Tuple[int, int]]:
+    """Return ``(actual_len, expected_len)`` if uncompressed PixelData size mismatches."""
+    if 'PixelData' not in ds:
+        return None
+    pixel_bytes = ds.PixelData
+    file_meta = getattr(ds, 'file_meta', None)
+    ts_uid = getattr(file_meta, 'TransferSyntaxUID', None) if file_meta is not None else None
+    if ts_uid is not None and ts_uid.is_compressed:
+        return None
+    rows = as_int(ds.get('Rows')) or 0
+    cols = as_int(ds.get('Columns')) or 0
+    bits = as_int(ds.get('BitsAllocated')) or 16
+    samples = as_int(ds.get('SamplesPerPixel')) or 1
+    expected_len = rows * cols * samples * (bits // 8)
+    actual_len = len(pixel_bytes)
+    if expected_len > 0 and actual_len != expected_len:
+        return actual_len, expected_len
+    return None
+
+
+def verify_dicom_series_on_disk(file_paths: Sequence[Path]) -> Dict[str, Any]:
+    """Verify PixelData integrity and duplicate ImagePositionPatient across written files."""
+    pixel_errors: List[Tuple[str, int, int]] = []
+    positions: List[Tuple[float, float, float]] = []
+
+    for file_path in file_paths:
+        ds = pydicom.dcmread(str(file_path))
+        mismatch = _check_dataset_pixel_integrity(ds)
+        if mismatch is not None:
+            pixel_errors.append((Path(file_path).name, mismatch[0], mismatch[1]))
+        ipp = getattr(ds, 'ImagePositionPatient', None)
+        if ipp is not None and len(ipp) >= 3:
+            try:
+                positions.append(tuple(round(float(v), 4) for v in ipp[:3]))
+            except (TypeError, ValueError):
+                pass
+
+    unique_positions = set(positions)
+    has_duplicates = len(positions) > 1 and len(unique_positions) < len(positions)
+    return {
+        'total_files': len(file_paths),
+        'pixel_errors': pixel_errors,
+        'position_count': len(positions),
+        'unique_positions': len(unique_positions),
+        'duplicate_positions': has_duplicates,
+    }
+
+
+def _record_verified_slice(
+    results: dict,
+    ds: pydicom.Dataset,
+    out_path: Path,
+    modality: str,
+    pat_name: str,
+    fallback_series_label: str,
+) -> bool:
+    """Check uncompressed PixelData length and record ImagePositionPatient for post-verification."""
+    mismatch = _check_dataset_pixel_integrity(ds)
+    if mismatch is not None:
+        results['logs'].append(('log_pixel_length_error', out_path.name, mismatch[0], mismatch[1]))
+        return False
+
+    ipp = getattr(ds, 'ImagePositionPatient', None)
+    ipp_tuple: Optional[Tuple[float, float, float]] = None
+    if ipp is not None and len(ipp) >= 3:
+        try:
+            ipp_tuple = tuple(round(float(v), 4) for v in ipp[:3])
+        except (TypeError, ValueError):
+            ipp_tuple = None
+
+    series_label = str(getattr(ds, 'SeriesDescription', '') or fallback_series_label)
+    results['series_positions'].append(
+        (str(ds.SeriesInstanceUID), modality, pat_name, series_label, ipp_tuple)
+    )
+    return True
+
+
 def _process_batch_task(batch_task: dict) -> dict:
     """Глобальный воркер для обработки пакета (серии) DICOM файлов в одном дочернем процессе.
 
@@ -40,15 +195,16 @@ def _process_batch_task(batch_task: dict) -> dict:
     """
     tasks = batch_task['tasks']
     config = batch_task['config']
-    
+
     results = {
         'status': 'success',
         'logs': [],
         'success_count': 0,
         'error_count': 0,
         'no_pixel_count': 0,
+        'series_positions': [],
     }
-    
+
     if not tasks:
         return results
 
@@ -58,10 +214,10 @@ def _process_batch_task(batch_task: dict) -> dict:
     pat_name = first_task['pat_name']
     pat_id = first_task['pat_id']
     series_folder = first_task['series_folder']
-    
+
     series_success = 0
     series_errors = 0
-    
+
     for task in tasks:
         file_path = task['file_path']
         dest_dir = task['dest_dir']
@@ -71,20 +227,21 @@ def _process_batch_task(batch_task: dict) -> dict:
         sop_class = task['sop_class']
         instance_number = task['instance_number']
         segment_idx = task['segment_idx']
-        
+        output_filename = task.get('output_filename')
+        mf_file_suffix = task.get('mf_file_suffix', '')
+
         filename = file_path.name
-        
+
         try:
             ds_full = safe_dcmread(file_path, stop_before_pixels=False)
-            
+
             # Защита от файлов без пикселей
             has_pixels = any(tag in ds_full for tag in ['PixelData', 'FloatPixelData', 'DoubleFloatPixelData'])
             if not has_pixels:
                 results['no_pixel_count'] += 1
                 continue
-                
+
         except Exception as e:
-            import traceback
             tb = traceback.format_exc()
             results['status'] = 'error'
             results['error_count'] += 1
@@ -93,13 +250,12 @@ def _process_batch_task(batch_task: dict) -> dict:
             results['logs'].append(('traceback', tb))
             continue
 
-        is_multiframe = hasattr(ds_full, 'NumberOfFrames') and int(ds_full.NumberOfFrames) > 1
+        is_multiframe = (as_int(ds_full.get('NumberOfFrames')) or 1) > 1
 
         if is_multiframe and config.split_multiframe:
             try:
                 pixel_array = ds_full.pixel_array
             except Exception as e:
-                import traceback
                 tb = traceback.format_exc()
                 results['status'] = 'error'
                 results['error_count'] += 1
@@ -108,57 +264,118 @@ def _process_batch_task(batch_task: dict) -> dict:
                 results['logs'].append(('traceback', tb))
                 continue
 
+            if pixel_array.ndim == 2:
+                pixel_array = pixel_array[np.newaxis, ...]
+
             n_frames = int(ds_full.NumberOfFrames)
             results['logs'].append(('log_split_multiframe', filename, n_frames))
 
-            shared_info = ds_full.SharedFunctionalGroupsSequence[0] if hasattr(ds_full, 'SharedFunctionalGroupsSequence') else None
-            
-            if config.new_uids or segment_idx > 0:
-                from pydicom.uid import generate_uid
-                current_series_uid = generate_uid()
+            frames_meta, geo_warnings = extract_multiframe_frames(ds_full)
+            for warn in geo_warnings:
+                if warn[0] == 'reconstructed_ipp':
+                    results['logs'].append(('log_reconstructed_ipp', filename, warn[1]))
+
+            groups = _group_multiframe_frames(frames_meta, split_series=config.split_series)
+            has_multiple_subseries = len(groups) > 1
+            if has_multiple_subseries:
+                results['logs'].append(('log_subseries_split', filename, len(groups), n_frames))
+
+            shared_info = ds_full.SharedFunctionalGroupsSequence[0] if hasattr(ds_full, 'SharedFunctionalGroupsSequence') and ds_full.SharedFunctionalGroupsSequence else None
+            per_frame_seq = ds_full.PerFrameFunctionalGroupsSequence if hasattr(ds_full, 'PerFrameFunctionalGroupsSequence') else None
+
+            if config.new_uids or segment_idx > 0 or mf_file_suffix:
+                base_group_series_uid = generate_uid()
             else:
-                current_series_uid = series_uid_mapped
+                base_group_series_uid = series_uid_mapped
+
+            base_series_num = as_int(ds_full.get('SeriesNumber'))
+            if base_series_num is None:
+                base_series_num = 1
+            orig_series_desc = str(getattr(ds_full, 'SeriesDescription', '') or '').strip()
+            safe_desc = make_safe_filename(orig_series_desc) if orig_series_desc else 'NoDescription'
+            if segment_idx > 0:
+                safe_desc = f"{safe_desc}_Seg{segment_idx}"
+
+            temporal_vals = {f.temporal_index for f in frames_meta if f.temporal_index is not None}
+            has_multiple_temporal = len(temporal_vals) > 1
+            used_folder_suffixes: Set[str] = set()
 
             multiframe_errors = 0
-            for i in range(n_frames):
-                frame_info = ds_full.PerFrameFunctionalGroupsSequence[i] if hasattr(ds_full, 'PerFrameFunctionalGroupsSequence') else None
+            for group_idx, group_frames in enumerate(groups):
+                if has_multiple_subseries:
+                    sub_series_uid = base_group_series_uid if group_idx == 0 else generate_uid()
+                    sub_series_num = base_series_num + group_idx
+                    desc_suffix, folder_suffix = _build_subseries_labels(
+                        group_frames, group_idx, used_folder_suffixes, has_multiple_temporal
+                    )
+                    sub_series_desc = f"{orig_series_desc} [{desc_suffix}]" if orig_series_desc else desc_suffix
+                    sub_folder_name = f"{modality}_{sub_series_num}_{safe_desc}_{folder_suffix}{mf_file_suffix}"
+                    target_dir = dest_dir.parent / sub_folder_name
+                else:
+                    sub_series_uid = base_group_series_uid
+                    sub_series_num = None
+                    sub_series_desc = None
+                    target_dir = dest_dir
 
-                try:
-                    cleaned_ds = clean_and_build_dataset(
-                        src_ds=ds_full,
-                        pixel_data=pixel_array[i],
-                        instance_number=i + 1,
-                        study_uid=study_uid_mapped,
-                        series_uid=current_series_uid,
-                        sop_class=sop_class,
-                        for_uid=for_uid_mapped,
-                        config=config
+                target_dir.mkdir(parents=True, exist_ok=True)
+                slice_suffix = '' if has_multiple_subseries else mf_file_suffix
+
+                for inst_idx, frame_meta in enumerate(group_frames, start=1):
+                    frame_idx = frame_meta.index
+                    frame_info = (
+                        per_frame_seq[frame_idx]
+                        if per_frame_seq is not None and frame_idx < len(per_frame_seq)
+                        else None
                     )
 
-                    cleaned_ds.PatientName = pat_name
-                    cleaned_ds.PatientID = pat_id
+                    try:
+                        cleaned_ds = clean_and_build_dataset(
+                            src_ds=ds_full,
+                            pixel_data=pixel_array[frame_idx],
+                            instance_number=inst_idx,
+                            study_uid=study_uid_mapped,
+                            series_uid=sub_series_uid,
+                            sop_class=sop_class,
+                            for_uid=for_uid_mapped,
+                            config=config,
+                            frame_type=frame_meta.frame_type,
+                        )
 
-                    copy_geometry_and_rescale(
-                        src_ds=ds_full,
-                        new_ds=cleaned_ds,
-                        frame_info=frame_info,
-                        shared_info=shared_info,
-                        is_multiframe=True,
-                        frame_idx=i
-                    )
+                        cleaned_ds.PatientName = pat_name
+                        cleaned_ds.PatientID = pat_id
+                        if sub_series_num is not None:
+                            cleaned_ds.SeriesNumber = sub_series_num
+                        if sub_series_desc is not None:
+                            cleaned_ds.SeriesDescription = sub_series_desc
 
-                    out_path = dest_dir / f"slice_{i+1:04d}.dcm"
-                    save_dicom_file(out_path, cleaned_ds, config.explicit_vr)
-                    results['success_count'] += 1
-                    series_success += 1
-                except Exception as e:
-                    import traceback
-                    tb = traceback.format_exc()
-                    results['logs'].append(('log_frame_save_error', i + 1, filename, str(e)))
-                    results['logs'].append(('traceback', tb))
-                    multiframe_errors += 1
-                    results['error_count'] += 1
-                    series_errors += 1
+                        copy_geometry_and_rescale(
+                            src_ds=ds_full,
+                            new_ds=cleaned_ds,
+                            frame_info=frame_info,
+                            shared_info=shared_info,
+                            is_multiframe=True,
+                            frame_idx=frame_idx,
+                            frame_meta=frame_meta,
+                        )
+
+                        out_path = target_dir / f"slice_{inst_idx:04d}{slice_suffix}.dcm"
+                        save_dicom_file(out_path, cleaned_ds, config.explicit_vr)
+                        if _record_verified_slice(
+                            results, cleaned_ds, out_path, modality, pat_name, target_dir.name
+                        ):
+                            results['success_count'] += 1
+                            series_success += 1
+                        else:
+                            multiframe_errors += 1
+                            results['error_count'] += 1
+                            series_errors += 1
+                    except Exception as e:
+                        tb = traceback.format_exc()
+                        results['logs'].append(('log_frame_save_error', frame_idx + 1, filename, str(e)))
+                        results['logs'].append(('traceback', tb))
+                        multiframe_errors += 1
+                        results['error_count'] += 1
+                        series_errors += 1
 
             if multiframe_errors == 0:
                 results['logs'].append(('log_split_success', modality, pat_name, pat_id, series_folder, filename, n_frames))
@@ -167,6 +384,7 @@ def _process_batch_task(batch_task: dict) -> dict:
 
         else:
             try:
+                dest_dir.mkdir(parents=True, exist_ok=True)
                 # Оптимизированный in-place путь для single-frame файлов
                 cleaned_ds = clean_and_build_dataset_inplace(
                     src_ds=ds_full,
@@ -190,12 +408,19 @@ def _process_batch_task(batch_task: dict) -> dict:
                     frame_idx=0
                 )
 
-                out_path = dest_dir / f"slice_{instance_number:04d}.dcm"
+                fname = output_filename or f"slice_{instance_number:04d}.dcm"
+                out_path = dest_dir / fname
                 save_dicom_file(out_path, cleaned_ds, config.explicit_vr)
-                results['success_count'] += 1
-                series_success += 1
+                if _record_verified_slice(
+                    results, cleaned_ds, out_path, modality, pat_name, series_folder
+                ):
+                    results['success_count'] += 1
+                    series_success += 1
+                else:
+                    results['error_count'] += 1
+                    series_errors += 1
+                    results['status'] = 'error'
             except Exception as e:
-                import traceback
                 tb = traceback.format_exc()
                 results['logs'].append(('log_save_error', filename, str(e)))
                 results['logs'].append(('traceback', tb))
@@ -261,6 +486,9 @@ class DicomProcessor:
         self.series_uid_map: Dict[str, str] = {}
         self.for_uid_map: Dict[str, str] = {}
         self.series_counters: Dict[str, int] = {}
+        self.assigned_dest_dirs: Dict[Path, str] = {}
+        self.dest_dir_used_names: Dict[Path, Set[str]] = {}
+        self.dest_dir_mf_counts: Dict[Path, int] = {}
 
     def _load_translations(self, lang: str) -> Dict[str, str]:
         """Загружает файл локализации для процессора."""
@@ -331,6 +559,9 @@ class DicomProcessor:
             self.non_dicom_count = 0
             self.no_pixel_count = 0
             self.excluded_count = 0
+            self.assigned_dest_dirs.clear()
+            self.dest_dir_used_names.clear()
+            self.dest_dir_mf_counts.clear()
             start_time = datetime.now()
 
             # Группируем файлы по сериям для предварительного анализа (параллельный быстрый проход)
@@ -427,6 +658,7 @@ class DicomProcessor:
                     })
 
             # Выполняем задачи в пуле процессов
+            series_pos_map: Dict[str, List[Tuple[str, str, str, Optional[Tuple[float, float, float]]]]] = {}
             if batch_tasks and not self.stop_event.is_set():
                 num_workers = max(1, (os.cpu_count() or 4) - 1)
                 
@@ -455,6 +687,9 @@ class DicomProcessor:
                             self.error_count += res['error_count']
                             self.no_pixel_count += res['no_pixel_count']
 
+                            for s_uid, mod, p_name, s_label, ipp_tuple in res.get('series_positions', []):
+                                series_pos_map.setdefault(s_uid, []).append((mod, p_name, s_label, ipp_tuple))
+
                             for log_item in res['logs']:
                                 key = log_item[0]
                                 args = log_item[1:]
@@ -462,9 +697,9 @@ class DicomProcessor:
                                     self.logger.log(args[0], "error")
                                 else:
                                     # Определяем тег лога
-                                    if key in ('log_pixel_error', 'log_frame_save_error', 'log_save_error', 'log_critical_error'):
+                                    if key in ('log_pixel_error', 'log_frame_save_error', 'log_save_error', 'log_critical_error', 'log_pixel_length_error'):
                                         tag = "error"
-                                    elif key in ('log_non_dicom', 'log_read_error', 'log_split_warning', 'log_files_not_found', 'log_stop_user', 'log_series_warning'):
+                                    elif key in ('log_non_dicom', 'log_read_error', 'log_split_warning', 'log_files_not_found', 'log_stop_user', 'log_series_warning', 'log_reconstructed_ipp', 'log_duplicate_ipp'):
                                         tag = "warning"
                                     elif key in ('log_finished_success', 'log_split_success', 'log_series_success'):
                                         tag = "success"
@@ -479,6 +714,20 @@ class DicomProcessor:
                         b_task_files_count = len(futures[fut]['tasks'])
                         self.processed_count += b_task_files_count
                         self.logger.update_progress(self.processed_count, total_files)
+
+            # Post-verification: check for duplicate ImagePositionPatient within each output series
+            if not self.stop_event.is_set():
+                for s_uid, entries in series_pos_map.items():
+                    total_slices = len(entries)
+                    positions = [e[3] for e in entries if e[3] is not None]
+                    if total_slices > 1 and len(positions) > 1:
+                        unique_positions = set(positions)
+                        if len(unique_positions) < len(positions):
+                            mod, p_name, s_label, _ = entries[0]
+                            self.logger.log(
+                                self.loc("log_duplicate_ipp", mod, p_name, s_label, len(unique_positions), total_slices),
+                                "warning"
+                            )
 
             end_time = datetime.now()
             duration = (end_time - start_time).total_seconds()
@@ -573,14 +822,11 @@ class DicomProcessor:
         patient_name = make_safe_filename(pat_name)
         patient_id = make_safe_filename(pat_id)
         patient_folder = f"{patient_name}_{patient_id}"
-        
+
         if series_num_str:
             series_folder = f"{modality}_{series_num_str}_{series_desc}"
         else:
             series_folder = f"{modality}_{series_desc}"
-            
-        dest_dir = self.output_dir / patient_folder / series_folder
-        dest_dir.mkdir(parents=True, exist_ok=True)
 
         sop_class = SOP_CLASS_MAPPING.get(modality, DEFAULT_SOP_CLASS)
 
@@ -608,6 +854,18 @@ class DicomProcessor:
                 series_uid_mapped = orig_series_uid
                 for_uid_mapped = orig_for_uid or generate_uid()
 
+        # Assign a unique output directory per mapped series to prevent folder collisions
+        claim_key = f"{series_uid_mapped}_{segment_idx}"
+        dest_dir = self.output_dir / patient_folder / series_folder
+        suffix_idx = 2
+        while dest_dir in self.assigned_dest_dirs and self.assigned_dest_dirs[dest_dir] != claim_key:
+            dest_dir = self.output_dir / patient_folder / f"{series_folder}_{suffix_idx}"
+            suffix_idx += 1
+        self.assigned_dest_dirs[dest_dir] = claim_key
+        series_folder = dest_dir.name
+
+        used_names = self.dest_dir_used_names.setdefault(dest_dir, set())
+
         for file_path, ds_header in items:
             if series_uid_mapped not in self.series_counters:
                 self.series_counters[series_uid_mapped] = 1
@@ -623,6 +881,33 @@ class DicomProcessor:
                 except (ValueError, TypeError):
                     current_instance = self.series_counters[series_uid_mapped]
 
+            n_frames = as_int(ds_header.get('NumberOfFrames')) or 1
+            is_mf_task = self.config.split_multiframe and n_frames > 1
+
+            if is_mf_task:
+                mf_idx = self.dest_dir_mf_counts.get(dest_dir, 0)
+                self.dest_dir_mf_counts[dest_dir] = mf_idx + 1
+                if mf_idx == 0 and not any(f"slice_{i + 1:04d}.dcm" in used_names for i in range(n_frames)):
+                    mf_file_suffix = ""
+                else:
+                    cand_num = max(2, mf_idx + 1)
+                    while any(f"slice_{i + 1:04d}_mf{cand_num}.dcm" in used_names for i in range(n_frames)):
+                        cand_num += 1
+                    mf_file_suffix = f"_mf{cand_num}"
+                for i in range(n_frames):
+                    used_names.add(f"slice_{i + 1:04d}{mf_file_suffix}.dcm")
+                output_filename = None
+            else:
+                base_name = f"slice_{current_instance:04d}"
+                candidate_name = f"{base_name}.dcm"
+                dup_idx = 2
+                while candidate_name in used_names:
+                    candidate_name = f"{base_name}_{dup_idx}.dcm"
+                    dup_idx += 1
+                used_names.add(candidate_name)
+                output_filename = candidate_name
+                mf_file_suffix = ""
+
             task = {
                 'file_path': file_path,
                 'dest_dir': dest_dir,
@@ -637,6 +922,8 @@ class DicomProcessor:
                 'segment_idx': segment_idx,
                 'modality': modality,
                 'series_folder': series_folder,
+                'output_filename': output_filename,
+                'mf_file_suffix': mf_file_suffix,
             }
             tasks_list.append(task)
 
