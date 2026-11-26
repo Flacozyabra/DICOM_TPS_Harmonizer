@@ -13,6 +13,7 @@ from src.core.converter import (
     clean_and_build_dataset_inplace,
     copy_geometry_and_rescale,
     extract_multiframe_frames,
+    save_dicom_file,
 )
 from src.core.recovery import safe_dcmread
 from src.utils.helpers import compute_slice_location, compute_slice_normal
@@ -242,6 +243,106 @@ class ConverterTests(unittest.TestCase):
             self.assertEqual(int(recovered.Rows), 16)
             self.assertEqual(int(recovered.Columns), 16)
             np.testing.assert_array_equal(recovered.pixel_array, pixels[0])
+
+    def test_cyrillic_upgrades_charset_to_utf8_and_ascii_keeps_latin1(self):
+        frame_specs = [
+            {"position": (0.0, 0.0, 0.0), "orientation": (1.0, 0.0, 0.0, 0.0, 1.0, 0.0)},
+        ]
+        ds_cyr, px_cyr = build_enhanced_mr_dataset(
+            frame_specs,
+            patient_name="Иванов^Иван",
+            series_description="Т2_аксиал",
+        )
+        ds_cyr.SpecificCharacterSet = "ISO_IR 100"
+        cfg = _default_config()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_mf = Path(tmpdir) / "cyr_mf.dcm"
+            built = clean_and_build_dataset(
+                ds_cyr, px_cyr[0], 1, generate_uid(), generate_uid(), CLASSIC_MR_SOP_CLASS, generate_uid(), cfg
+            )
+            save_dicom_file(out_mf, built, explicit_vr=True)
+            reloaded = pydicom.dcmread(str(out_mf))
+            self.assertEqual(reloaded.SpecificCharacterSet, "ISO_IR 192")
+            self.assertEqual(str(reloaded.PatientName), "Иванов^Иван")
+            self.assertEqual(str(reloaded.SeriesDescription), "Т2_аксиал")
+
+            # ASCII dataset must retain ISO_IR 100
+            ds_asc, px_asc = build_enhanced_mr_dataset(frame_specs, patient_name="Doe^John", series_description="T2_AX")
+            out_asc = Path(tmpdir) / "asc.dcm"
+            built_asc = clean_and_build_dataset(
+                ds_asc, px_asc[0], 1, generate_uid(), generate_uid(), CLASSIC_MR_SOP_CLASS, generate_uid(), cfg
+            )
+            save_dicom_file(out_asc, built_asc, explicit_vr=True)
+            reloaded_asc = pydicom.dcmread(str(out_asc))
+            self.assertEqual(reloaded_asc.SpecificCharacterSet, "ISO_IR 100")
+
+    def test_rgb_8bit_image_preserves_8bit_and_pixels(self):
+        ds, _ = build_enhanced_mr_dataset(
+            [{"position": (0.0, 0.0, 0.0), "orientation": (1.0, 0.0, 0.0, 0.0, 1.0, 0.0)}],
+            bits_allocated=8,
+            bits_stored=8,
+            high_bit=7,
+        )
+        rgb = np.arange(16 * 16 * 3, dtype=np.uint8).reshape(16, 16, 3)
+        ds.NumberOfFrames = 1
+        ds.Modality = "US"
+        ds.SamplesPerPixel = 3
+        ds.PhotometricInterpretation = "RGB"
+        ds.PlanarConfiguration = 0
+        ds.PixelData = rgb.tobytes()
+        ds["PixelData"].VR = "OB"
+
+        cfg = _default_config()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_path = Path(tmpdir) / "rgb.dcm"
+            built = clean_and_build_dataset(
+                ds, rgb, 1, generate_uid(), generate_uid(), "1.2.840.10008.5.1.4.1.1.6.1", generate_uid(), cfg
+            )
+            save_dicom_file(out_path, built, explicit_vr=True)
+            reloaded = pydicom.dcmread(str(out_path))
+            self.assertEqual(int(reloaded.BitsAllocated), 8)
+            self.assertEqual(int(reloaded.SamplesPerPixel), 3)
+            np.testing.assert_array_equal(reloaded.pixel_array, rgb)
+
+            # Also verify in-place path preserves 8-bit RGB
+            out_inplace = Path(tmpdir) / "rgb_inplace.dcm"
+            inplace_ds = clean_and_build_dataset_inplace(
+                ds, 1, generate_uid(), generate_uid(), "1.2.840.10008.5.1.4.1.1.6.1", generate_uid(), cfg
+            )
+            save_dicom_file(out_inplace, inplace_ds, explicit_vr=True)
+            reloaded_in = pydicom.dcmread(str(out_inplace))
+            self.assertEqual(int(reloaded_in.BitsAllocated), 8)
+            np.testing.assert_array_equal(reloaded_in.pixel_array, rgb)
+
+    def test_ct_table_angles_are_forced_to_zero_for_monaco(self):
+        ds, px = build_enhanced_mr_dataset(
+            [{"position": (0.0, 0.0, 0.0), "orientation": (1.0, 0.0, 0.0, 0.0, 1.0, 0.0)}]
+        )
+        ds.Modality = "CT"
+        ds.PatientSupportAngle = 15.0
+        ds.TableTopPitchAngle = 2.0
+        ds.TableTopRollAngle = -1.0
+        out = clean_and_build_dataset(
+            ds, px[0], 1, generate_uid(), generate_uid(), "1.2.840.10008.5.1.4.1.1.2", generate_uid(), _default_config()
+        )
+        self.assertEqual(float(out.PatientSupportAngle), 0.0)
+        self.assertEqual(float(out.TableTopPitchAngle), 0.0)
+        self.assertEqual(float(out.TableTopRollAngle), 0.0)
+
+    def test_safe_dcmread_rejects_truncated_uncompressed_pixels(self):
+        ds, _ = build_enhanced_mr_dataset(
+            [{"position": (0.0, 0.0, 0.0), "orientation": (1.0, 0.0, 0.0, 0.0, 1.0, 0.0)}]
+        )
+        ds.NumberOfFrames = 1
+        with tempfile.TemporaryDirectory() as tmpdir:
+            orig = Path(tmpdir) / "orig.dcm"
+            save_dataset(ds, orig)
+            raw = orig.read_bytes()
+            trunc = Path(tmpdir) / "trunc_uncomp.dcm"
+            trunc.write_bytes(raw[:-20])
+            with self.assertRaises(ValueError):
+                safe_dcmread(trunc, stop_before_pixels=False)
 
 
 if __name__ == "__main__":

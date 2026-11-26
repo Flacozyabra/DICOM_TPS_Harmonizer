@@ -316,6 +316,64 @@ class ProcessorMultiframeTests(unittest.TestCase):
             self.assertEqual(len({str(pydicom.dcmread(str(p)).SeriesInstanceUID) for p in out_files}), 3)
             self.assertFalse(any("duplicate ImagePositionPatient" in msg for _, msg in logger.records))
 
+    def test_deterministic_ordering_for_single_frame_without_instance_number(self):
+        axial = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0)
+        study_uid = generate_uid()
+        series_uid = generate_uid()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            in_dir = Path(tmpdir) / "in"
+            out_dir = Path(tmpdir) / "out"
+            for fname, z_val in (("d.dcm", 30.0), ("a.dcm", 10.0), ("c.dcm", 40.0), ("b.dcm", 20.0)):
+                ds, _ = build_enhanced_mr_dataset(
+                    [{"position": (0.0, 0.0, z_val), "orientation": axial}],
+                    study_uid=study_uid,
+                    series_uid=series_uid,
+                    series_number=701,
+                    series_description="NO_INST",
+                )
+                ds.NumberOfFrames = 1
+                ds.ImagePositionPatient = [0.0, 0.0, z_val]
+                ds.ImageOrientationPatient = list(axial)
+                if "InstanceNumber" in ds:
+                    del ds.InstanceNumber
+                save_dataset(ds, in_dir / fname)
+
+            proc, _ = self._run_processor(in_dir, out_dir, _default_config())
+            self.assertEqual(proc.success_count, 4)
+
+            out_files = sorted(out_dir.rglob("*.dcm"))
+            z_by_slice = [float(pydicom.dcmread(str(p)).ImagePositionPatient[2]) for p in out_files]
+            self.assertEqual(z_by_slice, [10.0, 20.0, 30.0, 40.0])
+
+    def test_mismatched_number_of_frames_reports_clear_error(self):
+        axial = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0)
+        ds, px = build_enhanced_mr_dataset(
+            [
+                {"position": (0.0, 0.0, 0.0), "orientation": axial},
+                {"position": (0.0, 0.0, 2.5), "orientation": axial},
+            ],
+            series_number=801,
+            series_description="BAD_NFRAMES",
+        )
+        # Claim 5 frames in header when PixelData only holds 2 frames
+        ds.NumberOfFrames = 5
+        with tempfile.TemporaryDirectory() as tmpdir:
+            in_dir = Path(tmpdir) / "in"
+            out_dir = Path(tmpdir) / "out"
+            save_dataset(ds, in_dir / "bad_frames.dcm")
+
+            proc, logger = self._run_processor(in_dir, out_dir, _default_config())
+            self.assertEqual(proc.success_count, 0)
+            self.assertGreaterEqual(proc.error_count, 1)
+            self.assertTrue(
+                any(
+                    tag == "error" and ("Truncated uncompressed PixelData" in msg or "expected 5" in msg)
+                    for tag, msg in logger.records
+                ),
+                f"Expected frame count mismatch error in logs: {logger.records}",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

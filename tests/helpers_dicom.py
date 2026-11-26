@@ -131,8 +131,6 @@ def build_enhanced_mr_dataset(
     file_meta.ImplementationClassUID = pydicom.uid.PYDICOM_IMPLEMENTATION_UID
 
     ds = FileDataset("", {}, file_meta=file_meta, preamble=b"\0" * 128)
-    ds.is_little_endian = True
-    ds.is_implicit_VR = False
 
     ds.SpecificCharacterSet = "ISO_IR 100"
     ds.SOPClassUID = ENHANCED_MR_SOP_CLASS
@@ -220,5 +218,11 @@ def build_enhanced_mr_dataset(
 def save_dataset(ds: FileDataset, path: Path) -> Path:
     """Save a FileDataset to disk compatibly across pydicom 2.4+ and 3.x."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    ds.save_as(str(path), write_like_original=False)
+    try:
+        ds.save_as(str(path), enforce_file_format=True)
+    except TypeError:
+        ds.is_little_endian = True
+        ds.is_implicit_VR = False
+        ds.save_as(str(path), write_like_original=False)
     return path
+
