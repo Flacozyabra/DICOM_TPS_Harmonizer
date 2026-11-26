@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 import pydicom
@@ -373,6 +374,12 @@ class ConverterTests(unittest.TestCase):
             trunc.write_bytes(raw[:-20])
             with self.assertRaises(ValueError):
                 safe_dcmread(trunc, stop_before_pixels=False)
+
+            # Uncompressed datasets must not invoke Dataset.decompress() (avoids pydicom 2.4 NotImplementedError)
+            with mock.patch("pydicom.dataset.Dataset.decompress", side_effect=NotImplementedError("not compressed")) as m_dec:
+                ok_ds = safe_dcmread(orig, stop_before_pixels=False)
+                m_dec.assert_not_called()
+                self.assertEqual(int(ok_ds.Rows), 16)
 
 
 if __name__ == "__main__":

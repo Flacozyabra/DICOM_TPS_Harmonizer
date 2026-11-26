@@ -1492,7 +1492,8 @@ class DicomViewerPanel(QWidget):
                 rgb_arr = np.ascontiguousarray(raw_arr, dtype=np.uint8)
                 height, width, _ = rgb_arr.shape
                 self._temp_arr = rgb_arr
-                qimg = QImage(self._temp_arr.data, width, height, width * 3, QImage.Format.Format_RGB888)
+                self._temp_bytes = rgb_arr.tobytes()
+                qimg = QImage(self._temp_bytes, width, height, width * 3, QImage.Format.Format_RGB888)
                 return QPixmap.fromImage(qimg)
 
             arr = raw_arr.astype(float)
@@ -1515,7 +1516,8 @@ class DicomViewerPanel(QWidget):
             bytes_per_line = width
 
             self._temp_arr = np.ascontiguousarray(arr)
-            qimg = QImage(self._temp_arr.data, width, height, bytes_per_line, QImage.Format.Format_Grayscale8)
+            self._temp_bytes = self._temp_arr.tobytes()
+            qimg = QImage(self._temp_bytes, width, height, bytes_per_line, QImage.Format.Format_Grayscale8)
             return QPixmap.fromImage(qimg)
         except Exception:
             return None

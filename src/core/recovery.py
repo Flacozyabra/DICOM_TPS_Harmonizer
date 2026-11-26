@@ -12,14 +12,17 @@ def _validate_or_decompress_pixels(ds: Dataset) -> None:
     file_meta = getattr(ds, 'file_meta', None)
     ts_uid = getattr(file_meta, 'TransferSyntaxUID', None) if file_meta is not None else None
     is_compressed = bool(ts_uid is not None and ts_uid.is_compressed)
+    has_encapsulated = bool(getattr(ds.get('PixelData'), 'is_undefined_length', False))
 
-    try:
-        ds.decompress()
-    except AttributeError:
-        pass
-    except ValueError as e:
-        if "already uncompressed" not in str(e):
-            raise
+    if is_compressed or has_encapsulated:
+        try:
+            ds.decompress()
+        except AttributeError:
+            pass
+        except (ValueError, NotImplementedError) as e:
+            msg = str(e).lower()
+            if "already uncompressed" not in msg and "not compressed" not in msg:
+                raise
 
     if not is_compressed and 'PixelData' in ds:
         rows = int(getattr(ds, 'Rows', 0) or 0)
