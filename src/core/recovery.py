@@ -62,6 +62,11 @@ def safe_dcmread(file_path: Path, stop_before_pixels: bool = False) -> Dataset:
             raise pydicom.errors.InvalidDicomError("Missing SOPClassUID or empty dataset")
 
         if not stop_before_pixels:
+            # pydicom 2.4 may silently drop PixelData when (FFFE,E0DD) delimiter is missing
+            has_pixel_tag = any(t in ds for t in ('PixelData', 'FloatPixelData', 'DoubleFloatPixelData'))
+            is_image_ds = int(getattr(ds, 'Rows', 0) or 0) > 0 and int(getattr(ds, 'Columns', 0) or 0) > 0
+            if is_image_ds and not has_pixel_tag:
+                raise pydicom.errors.InvalidDicomError("Image dataset missing PixelData; triggering EOF recovery")
             _validate_or_decompress_pixels(ds)
 
         return ds
@@ -81,6 +86,10 @@ def safe_dcmread(file_path: Path, stop_before_pixels: bool = False) -> Dataset:
                 raise pydicom.errors.InvalidDicomError("Still missing SOPClassUID after fix")
 
             if not stop_before_pixels:
+                has_pixel_tag = any(t in ds for t in ('PixelData', 'FloatPixelData', 'DoubleFloatPixelData'))
+                is_image_ds = int(getattr(ds, 'Rows', 0) or 0) > 0 and int(getattr(ds, 'Columns', 0) or 0) > 0
+                if is_image_ds and not has_pixel_tag:
+                    raise pydicom.errors.InvalidDicomError("Image dataset still missing PixelData after fix")
                 _validate_or_decompress_pixels(ds)
 
             ds.is_restored = True

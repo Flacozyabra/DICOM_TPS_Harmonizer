@@ -381,6 +381,33 @@ class ConverterTests(unittest.TestCase):
                 m_dec.assert_not_called()
                 self.assertEqual(int(ok_ds.Rows), 16)
 
+    def test_siemens_eof_fix_triggers_when_parser_drops_pixel_data(self):
+        ds, pixels = build_enhanced_mr_dataset(
+            [{"position": (0.0, 0.0, 0.0), "orientation": (1.0, 0.0, 0.0, 0.0, 1.0, 0.0)}]
+        )
+        ds.NumberOfFrames = 1
+        ds.compress(pydicom.uid.RLELossless)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            orig_path = Path(tmpdir) / "orig.dcm"
+            save_dataset(ds, orig_path)
+            trunc_path = Path(tmpdir) / "trunc_drop.dcm"
+            trunc_path.write_bytes(orig_path.read_bytes()[:-8])
+
+            real_dcmread = pydicom.dcmread
+            calls = []
+
+            def _fake_pydicom24_dcmread(fp, *args, **kwargs):
+                calls.append(type(fp).__name__)
+                parsed = real_dcmread(fp, *args, **kwargs)
+                if len(calls) == 1 and "PixelData" in parsed:
+                    del parsed["PixelData"]
+                return parsed
+
+            with mock.patch("src.core.recovery.pydicom.dcmread", side_effect=_fake_pydicom24_dcmread):
+                recovered = safe_dcmread(trunc_path, stop_before_pixels=False)
+            self.assertTrue(getattr(recovered, "is_restored", False))
+            np.testing.assert_array_equal(recovered.pixel_array, pixels[0])
+
 
 if __name__ == "__main__":
     unittest.main()
