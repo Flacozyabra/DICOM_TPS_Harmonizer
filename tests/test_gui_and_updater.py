@@ -143,6 +143,23 @@ class GuiAndUpdaterTests(unittest.TestCase):
                 self.assertEqual(win.progress_bar.value(), 0)
                 win.close()
 
+    def test_gui_stores_scan_cache_and_invalidates_on_input_change(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cfg_path = Path(tmpdir) / "config.json"
+            with mock.patch.object(DicomSplitterApp, "get_config_path", return_value=cfg_path), \
+                 mock.patch.object(DicomSplitterApp, "check_updates", return_value=None):
+                win = DicomSplitterApp()
+                resolved = str(Path(tmpdir).resolve())
+                win.on_tree_scanned({}, {Path(tmpdir) / "a.dcm": {"PatientName": "X"}}, resolved)
+                self.assertEqual(len(win.scanned_header_cache), 1)
+                self.assertEqual(win.scanned_input_dir, resolved)
+
+                # Changing input folder clears stale cached headers
+                win.input_entry.setText(str(Path(tmpdir) / "other"))
+                self.assertEqual(win.scanned_header_cache, {})
+                self.assertEqual(win.scanned_input_dir, "")
+                win.close()
+
     def test_updater_sha256_and_tls_fallback(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             sample = Path(tmpdir) / "update.tmp"

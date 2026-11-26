@@ -149,6 +149,7 @@
     "log_duplicate_ipp": "Warning: series {} ({} / {}) has duplicate ImagePositionPatient ({} unique positions across {} slices) — verify before importing into TPS.",
     "log_pixel_length_error": "Pixel integrity error in {}: PixelData size ({} bytes) does not match expected ({} bytes).",
     "log_reading_headers": "Reading DICOM headers ({} files)...",
+    "log_using_cached_headers": "Using cached DICOM headers ({} files)...",
     "log_starting_workers": "Starting optimization ({} batches, {} workers)...",
     "mm": "mm"
 }

@@ -465,13 +465,113 @@ def _compute_worker_count(num_batches: int, cpu_count: Optional[int] = None) -> 
     return min(num_batches, target_workers)
 
 
+def _extract_header_meta(ds: Any) -> dict:
+    """Extract lightweight planning metadata dict from a pydicom Dataset."""
+    if isinstance(ds, dict):
+        return ds
+
+    raw_pat_name = getattr(ds, 'PatientName', 'UNKNOWN')
+    raw_pat_id = getattr(ds, 'PatientID', 'UNKNOWN')
+    raw_study_uid = getattr(ds, 'StudyInstanceUID', 'unknown_study')
+    raw_series_uid = getattr(ds, 'SeriesInstanceUID', 'unknown_series')
+    raw_series_num = ds.get('SeriesNumber')
+    raw_image_type: List[str] = []
+    try:
+        it_val = getattr(ds, 'ImageType', [])
+        if it_val:
+            if isinstance(it_val, str):
+                raw_image_type = [it_val]
+            else:
+                raw_image_type = [str(t) for t in it_val]
+    except Exception:
+        pass
+
+    return {
+        'PatientName': str(raw_pat_name) if raw_pat_name else 'UNKNOWN',
+        'PatientID': str(raw_pat_id) if raw_pat_id else 'UNKNOWN',
+        'StudyInstanceUID': str(raw_study_uid) if raw_study_uid else 'unknown_study',
+        'SeriesInstanceUID': str(raw_series_uid) if raw_series_uid else 'unknown_series',
+        'FrameOfReferenceUID': str(ds.FrameOfReferenceUID) if getattr(ds, 'FrameOfReferenceUID', None) else None,
+        'StudyDate': str(getattr(ds, 'StudyDate', '') or ''),
+        'StudyDescription': str(getattr(ds, 'StudyDescription', 'NoDescription')),
+        'Modality': str(getattr(ds, 'Modality', 'OT') or 'OT'),
+        'SeriesDescription': str(ds.SeriesDescription) if hasattr(ds, 'SeriesDescription') else 'NoDescription',
+        'SeriesNumber': str(raw_series_num) if raw_series_num is not None else None,
+        'InstanceNumber': as_int(ds.get('InstanceNumber')),
+        'NumberOfFrames': as_int(ds.get('NumberOfFrames')) or 1,
+        'ImagePositionPatient': as_floats(ds.get('ImagePositionPatient')),
+        'ImageOrientationPatient': as_floats(ds.get('ImageOrientationPatient')),
+        'ImageType': raw_image_type,
+    }
+
+
+def _extract_scan_problem_flags(ds: Any) -> dict:
+    """Inspect a DICOM header Dataset for scan-summary compatibility warnings."""
+    flags = {
+        'implicit_vr': False,
+        'multiframe': False,
+        'private_tags': False,
+        'bits_allocated': False,
+        'missing_tags': False,
+        'corrupted_siemens': bool(getattr(ds, 'is_restored', False)),
+    }
+    try:
+        if getattr(ds, 'file_meta', None) and getattr(ds.file_meta, 'TransferSyntaxUID', None) and ds.file_meta.TransferSyntaxUID.is_implicit_VR:
+            flags['implicit_vr'] = True
+    except Exception:
+        pass
+    try:
+        if hasattr(ds, 'NumberOfFrames') and int(ds.NumberOfFrames) > 1:
+            flags['multiframe'] = True
+    except Exception:
+        pass
+    try:
+        if any(tag.is_private for tag in ds.keys()):
+            flags['private_tags'] = True
+    except Exception:
+        pass
+    try:
+        if hasattr(ds, 'BitsAllocated') and ds.BitsAllocated != 16:
+            flags['bits_allocated'] = True
+    except Exception:
+        pass
+    try:
+        for tag in ('AccessionNumber', 'StudyID', 'ReferringPhysicianName'):
+            if not hasattr(ds, tag) or not getattr(ds, tag):
+                flags['missing_tags'] = True
+                break
+    except Exception:
+        pass
+    return flags
+
+
+def _orientation_key_from_meta(meta: dict) -> Optional[tuple]:
+    """Compute rounded ImageOrientationPatient tuple for geometric splitting."""
+    ori = meta.get('ImageOrientationPatient')
+    if not ori:
+        return None
+    try:
+        return tuple(round(float(x), 4) for x in ori)
+    except Exception:
+        return None
+
+
 def _read_header_task(file_path: Path) -> tuple:
-    """Вспомогательная функция для параллельного чтения заголовков DICOM файлов."""
+    """Read DICOM header in parallel and return lightweight metadata."""
     try:
         ds = safe_dcmread(file_path, stop_before_pixels=True)
-        return file_path, ds, None
+        return file_path, _extract_header_meta(ds), None
     except Exception as e:
         return file_path, None, e
+
+
+def _scan_header_task(file_path: Path) -> tuple:
+    """Read DICOM header during directory scan, returning metadata and issue flags."""
+    try:
+        ds = safe_dcmread(file_path, stop_before_pixels=True)
+        return file_path, _extract_header_meta(ds), _extract_scan_problem_flags(ds)
+    except Exception:
+        return file_path, None, None
 
 
 class DicomProcessor:
@@ -486,7 +586,8 @@ class DicomProcessor:
         stop_event: threading.Event,
         lang: str = "ru",
         selected_files: List[Path] = None,
-        patient_overrides: Dict[tuple, tuple] = None
+        patient_overrides: Dict[tuple, tuple] = None,
+        header_cache: Optional[Dict[Path, dict]] = None
     ) -> None:
         """Инициализация процессора.
 
@@ -499,6 +600,7 @@ class DicomProcessor:
             lang: Язык логирования ("ru" или "en").
             selected_files: Список файлов для обработки.
             patient_overrides: Словарь переопределения имен/ID пациентов.
+            header_cache: Кеш метаданных заголовков, собранный при сканировании.
         """
         self.input_dir = Path(input_dir)
         self.output_dir = Path(output_dir)
@@ -508,6 +610,7 @@ class DicomProcessor:
         self.lang = lang
         self.selected_files = selected_files
         self.patient_overrides = patient_overrides
+        self.header_cache: Dict[Path, dict] = {Path(k): _extract_header_meta(v) for k, v in header_cache.items()} if header_cache else {}
         self.translations = self._load_translations(lang)
         self.study_uid_map: Dict[str, str] = {}
         self.series_uid_map: Dict[str, str] = {}
@@ -594,7 +697,6 @@ class DicomProcessor:
 
             # Phase weights per input file: 1 unit for header scan (0-25%), 3 units for conversion (25-100%)
             self._progress_total = total_files * 4
-            self.logger.log(self.loc("log_reading_headers", total_files))
             self.logger.update_progress(0, self._progress_total)
 
             self.assigned_dest_dirs.clear()
@@ -602,58 +704,75 @@ class DicomProcessor:
             self.dest_dir_mf_counts.clear()
             start_time = datetime.now()
 
-            # Группируем файлы по сериям для предварительного анализа (параллельный быстрый проход)
+            # Group files by series using cached headers first and reading only uncached files
             series_groups = {}
-            header_step = max(1, total_files // 25)
-            headers_done = 0
+            uncached_files: List[Path] = []
+            cached_count = 0
 
-            # Используем ThreadPoolExecutor для параллельного чтения заголовков (I/O)
-            with ThreadPoolExecutor(max_workers=32) as header_executor:
-                if self.stop_event.is_set():
-                    self.logger.log(self.loc("log_stop_user"), "warning")
-                    return
+            def _append_meta_to_series(fp: Path, hdr_meta: dict) -> None:
+                pat_name = hdr_meta['PatientName']
+                pat_id = hdr_meta['PatientID']
+                if self.patient_overrides and (pat_name, pat_id) in self.patient_overrides:
+                    pat_name, pat_id = self.patient_overrides[(pat_name, pat_id)]
+                if not pat_name:
+                    pat_name = "UNKNOWN"
+                if not pat_id:
+                    pat_id = "UNKNOWN"
+                key = (pat_name, pat_id, hdr_meta['StudyInstanceUID'], hdr_meta['SeriesInstanceUID'])
+                series_groups.setdefault(key, []).append((fp, hdr_meta))
 
-                header_futures = [header_executor.submit(_read_header_task, fp) for fp in all_files]
-                for fut in as_completed(header_futures):
+            for fp in all_files:
+                fp_path = fp if isinstance(fp, Path) else Path(fp)
+                cached_meta = self.header_cache.get(fp_path)
+                if cached_meta is not None:
+                    cached_count += 1
+                    _append_meta_to_series(fp_path, cached_meta)
+                else:
+                    uncached_files.append(fp_path)
+
+            if cached_count > 0:
+                self._progress_current += cached_count
+                self.logger.update_progress(min(self._progress_current, self._progress_total), self._progress_total)
+
+            if not uncached_files:
+                self.logger.log(self.loc("log_using_cached_headers", cached_count))
+            else:
+                self.logger.log(self.loc("log_reading_headers", len(uncached_files)))
+                header_step = max(1, len(uncached_files) // 25)
+                headers_done = 0
+
+                with ThreadPoolExecutor(max_workers=32) as header_executor:
                     if self.stop_event.is_set():
                         self.logger.log(self.loc("log_stop_user"), "warning")
-                        break
+                        return
 
-                    headers_done += 1
-                    file_path, ds, err = fut.result()
-                    filename = file_path.name
-                    if err is not None:
-                        if isinstance(err, ValueError):
-                            self.logger.log(self.loc("log_non_dicom", filename, str(err)), "warning")
-                            self.non_dicom_count += 1
-                        else:
-                            self.logger.log(self.loc("log_read_error", filename, str(err)), "error")
-                            self.error_count += 1
-                        self.processed_count += 1
-                        self._progress_current += 4
-                        self.logger.update_progress(min(self._progress_current, self._progress_total), self._progress_total)
-                        continue
+                    header_futures = [header_executor.submit(_read_header_task, fp) for fp in uncached_files]
+                    for fut in as_completed(header_futures):
+                        if self.stop_event.is_set():
+                            self.logger.log(self.loc("log_stop_user"), "warning")
+                            break
 
-                    self._progress_current += 1
-                    if headers_done == 1 or headers_done % header_step == 0 or headers_done == total_files:
-                        self.logger.update_progress(min(self._progress_current, self._progress_total), self._progress_total)
+                        headers_done += 1
+                        file_path, hdr_meta, err = fut.result()
+                        filename = file_path.name
+                        if err is not None:
+                            if isinstance(err, ValueError):
+                                self.logger.log(self.loc("log_non_dicom", filename, str(err)), "warning")
+                                self.non_dicom_count += 1
+                            else:
+                                self.logger.log(self.loc("log_read_error", filename, str(err)), "error")
+                                self.error_count += 1
+                            self.processed_count += 1
+                            self._progress_current += 4
+                            self.logger.update_progress(min(self._progress_current, self._progress_total), self._progress_total)
+                            continue
 
-                    pat_name = getattr(ds, 'PatientName', 'UNKNOWN')
-                    pat_id = getattr(ds, 'PatientID', 'UNKNOWN')
+                        self.header_cache[file_path] = hdr_meta
+                        self._progress_current += 1
+                        if headers_done == 1 or headers_done % header_step == 0 or headers_done == len(uncached_files):
+                            self.logger.update_progress(min(self._progress_current, self._progress_total), self._progress_total)
 
-                    if self.patient_overrides and (str(pat_name), str(pat_id)) in self.patient_overrides:
-                        pat_name, pat_id = self.patient_overrides[(str(pat_name), str(pat_id))]
-
-                    study_uid = getattr(ds, 'StudyInstanceUID', 'unknown_study')
-                    series_uid = getattr(ds, 'SeriesInstanceUID', 'unknown_series')
-
-                    if not pat_name:
-                        pat_name = "UNKNOWN"
-                    if not pat_id:
-                        pat_id = "UNKNOWN"
-
-                    key = (str(pat_name), str(pat_id), str(study_uid), str(series_uid))
-                    series_groups.setdefault(key, []).append((file_path, ds))
+                        _append_meta_to_series(file_path, hdr_meta)
 
             # Собираем все подзадачи
             sub_tasks = []
@@ -663,14 +782,9 @@ class DicomProcessor:
 
                 # Группируем элементы серии по ImageOrientationPatient для геометрического разделения
                 orientation_groups = {}
-                for file_path, ds in items:
-                    orientation_key = None
-                    if hasattr(ds, 'ImageOrientationPatient'):
-                        try:
-                            orientation_key = tuple(round(float(x), 4) for x in ds.ImageOrientationPatient)
-                        except Exception:
-                            pass
-                    orientation_groups.setdefault(orientation_key, []).append((file_path, ds))
+                for file_path, hdr_meta in items:
+                    orientation_key = _orientation_key_from_meta(hdr_meta)
+                    orientation_groups.setdefault(orientation_key, []).append((file_path, hdr_meta))
 
                 # Если включено разделение серий и у нас несколько ориентаций
                 if self.config.split_series and len(orientation_groups) > 1:
@@ -871,15 +985,16 @@ class DicomProcessor:
         tasks_list: list
     ) -> None:
         """Подготавливает задачи оптимизации для конкретного сегмента серии."""
-        first_file_path, first_ds = items[0]
-        modality = getattr(first_ds, 'Modality', 'OT')
-        series_desc = make_safe_filename(getattr(first_ds, 'SeriesDescription', 'NoDescription'))
+        first_file_path, first_raw = items[0]
+        first_meta = _extract_header_meta(first_raw)
+        modality = first_meta['Modality']
+        series_desc = make_safe_filename(first_meta['SeriesDescription'])
 
         if segment_idx > 0:
             series_desc = f"{series_desc}_Seg{segment_idx}"
 
         # Извлекаем SeriesNumber для предотвращения дублирования имен папок разных серий
-        series_num = getattr(first_ds, 'SeriesNumber', None)
+        series_num = first_meta['SeriesNumber']
         series_num_str = make_safe_filename(str(series_num)).strip() if series_num is not None else ""
 
         # Проверка на исключение служебных серий до создания папок
@@ -907,15 +1022,9 @@ class DicomProcessor:
                 is_localizer = True
             
             if not is_localizer:
-                try:
-                    image_type = getattr(first_ds, 'ImageType', [])
-                    if image_type:
-                        if isinstance(image_type, str):
-                            image_type = [image_type]
-                        if any('LOCALIZER' in str(t).upper() for t in image_type):
-                            is_localizer = True
-                except Exception:
-                    pass
+                image_type = first_meta.get('ImageType') or []
+                if any('LOCALIZER' in str(t).upper() for t in image_type):
+                    is_localizer = True
             
             if is_localizer:
                 self.logger.log(self.loc("log_skip_localizer", series_desc, modality))
@@ -939,7 +1048,7 @@ class DicomProcessor:
 
         orig_study_uid = study_uid
         orig_series_uid = series_uid
-        orig_for_uid = getattr(first_ds, 'FrameOfReferenceUID', None)
+        orig_for_uid = first_meta.get('FrameOfReferenceUID')
 
         if self.config.new_uids:
             study_uid_mapped = self.study_uid_map.setdefault(orig_study_uid, generate_uid())
@@ -973,13 +1082,15 @@ class DicomProcessor:
 
         used_names = self.dest_dir_used_names.setdefault(dest_dir, set())
 
+        normalized_items = [(fp, _extract_header_meta(hdr)) for fp, hdr in items]
+
         # Sort items deterministically so thread completion order never scrambles InstanceNumber assignment
         def _item_sort_key(item: tuple) -> tuple:
-            fp, ds_hdr = item
-            inst = as_int(ds_hdr.get('InstanceNumber'))
+            fp, meta_hdr = item
+            inst = meta_hdr.get('InstanceNumber')
             has_inst = 0 if inst is not None else 1
-            ipp = as_floats(ds_hdr.get('ImagePositionPatient'))
-            ori = as_floats(ds_hdr.get('ImageOrientationPatient'))
+            ipp = meta_hdr.get('ImagePositionPatient')
+            ori = meta_hdr.get('ImageOrientationPatient')
             sl = (
                 compute_slice_location(ipp, ori)
                 if (ipp and ori)
@@ -987,24 +1098,19 @@ class DicomProcessor:
             )
             return (has_inst, inst if inst is not None else 0, sl if sl is not None else 0.0, fp.name)
 
-        items = sorted(items, key=_item_sort_key)
+        normalized_items = sorted(normalized_items, key=_item_sort_key)
 
-        for file_path, ds_header in items:
+        for file_path, hdr_meta in normalized_items:
             if series_uid_mapped not in self.series_counters:
                 self.series_counters[series_uid_mapped] = 1
             else:
                 self.series_counters[series_uid_mapped] += 1
 
-            current_instance = getattr(ds_header, 'InstanceNumber', None)
+            current_instance = hdr_meta.get('InstanceNumber')
             if current_instance is None:
                 current_instance = self.series_counters[series_uid_mapped]
-            else:
-                try:
-                    current_instance = int(current_instance)
-                except (ValueError, TypeError):
-                    current_instance = self.series_counters[series_uid_mapped]
 
-            n_frames = as_int(ds_header.get('NumberOfFrames')) or 1
+            n_frames = hdr_meta.get('NumberOfFrames') or 1
             is_mf_task = self.config.split_multiframe and n_frames > 1
 
             if is_mf_task:
@@ -1067,6 +1173,7 @@ class DicomProcessor:
         if total_files > 0:
             self.logger.update_scan_progress(0, total_files)
 
+        self.header_cache = {}
         tree = {}
         problems = {
             'implicit_vr': 0,
@@ -1076,81 +1183,48 @@ class DicomProcessor:
             'missing_tags': 0,
             'corrupted_siemens': 0
         }
-        for idx, file_path in enumerate(all_files):
-            if self.stop_event.is_set():
-                break
-            try:
-                ds = safe_dcmread(file_path, stop_before_pixels=True)
-            except Exception:
-                continue
-
-            # Сбор статистики проблем
-            try:
-                if getattr(ds, 'file_meta', None) and getattr(ds.file_meta, 'TransferSyntaxUID', None) and ds.file_meta.TransferSyntaxUID.is_implicit_VR:
-                    problems['implicit_vr'] += 1
-            except Exception:
-                pass
-
-            try:
-                if hasattr(ds, 'NumberOfFrames') and int(ds.NumberOfFrames) > 1:
-                    problems['multiframe'] += 1
-            except Exception:
-                pass
-
-            try:
-                if any(tag.is_private for tag in ds.keys()):
-                    problems['private_tags'] += 1
-            except Exception:
-                pass
-
-            try:
-                if hasattr(ds, 'BitsAllocated') and ds.BitsAllocated != 16:
-                    problems['bits_allocated'] += 1
-            except Exception:
-                pass
-
-            try:
-                missing = False
-                for tag in ['AccessionNumber', 'StudyID', 'ReferringPhysicianName']:
-                    if not hasattr(ds, tag) or not getattr(ds, tag):
-                        missing = True
+        if total_files > 0:
+            scan_step = max(1, min(10, total_files // 25)) if total_files >= 25 else 1
+            scanned_done = 0
+            with ThreadPoolExecutor(max_workers=32) as scan_executor:
+                scan_futures = [scan_executor.submit(_scan_header_task, fp) for fp in all_files]
+                for fut in as_completed(scan_futures):
+                    if self.stop_event.is_set():
+                        if sys.version_info >= (3, 9):
+                            scan_executor.shutdown(wait=False, cancel_futures=True)
+                        else:
+                            for pending_fut in scan_futures:
+                                pending_fut.cancel()
+                            scan_executor.shutdown(wait=False)
                         break
-                if missing:
-                    problems['missing_tags'] += 1
-            except Exception:
-                pass
 
-            if getattr(ds, 'is_restored', False):
-                problems['corrupted_siemens'] += 1
+                    scanned_done += 1
+                    file_path, hdr_meta, flags = fut.result()
+                    if hdr_meta is None:
+                        if scanned_done % scan_step == 0 or scanned_done == total_files:
+                            self.logger.update_scan_progress(scanned_done, total_files)
+                        continue
 
-            patient_name = str(getattr(ds, 'PatientName', 'UNKNOWN'))
-            patient_id = str(getattr(ds, 'PatientID', 'UNKNOWN'))
-            patient_key = (patient_name, patient_id)
+                    self.header_cache[file_path] = hdr_meta
+                    for flag_key, is_flagged in flags.items():
+                        if is_flagged:
+                            problems[flag_key] += 1
 
-            study_date = str(getattr(ds, 'StudyDate', ''))
-            study_desc = str(getattr(ds, 'StudyDescription', 'NoDescription'))
-            study_uid = str(getattr(ds, 'StudyInstanceUID', 'no_study_uid'))
-            study_key = (study_date, study_desc, study_uid)
+                    patient_key = (hdr_meta['PatientName'], hdr_meta['PatientID'])
+                    study_key = (hdr_meta['StudyDate'], hdr_meta['StudyDescription'], hdr_meta['StudyInstanceUID'])
+                    series_num = hdr_meta['SeriesNumber'] if hdr_meta['SeriesNumber'] is not None else '0'
+                    series_desc = hdr_meta['SeriesDescription']
+                    modality = hdr_meta['Modality']
+                    series_uid = hdr_meta['SeriesInstanceUID']
+                    orientation_key = _orientation_key_from_meta(hdr_meta)
 
-            series_num = str(getattr(ds, 'SeriesNumber', '0'))
-            series_desc = str(getattr(ds, 'SeriesDescription', 'NoDescription'))
-            modality = str(getattr(ds, 'Modality', 'OT'))
-            series_uid = str(getattr(ds, 'SeriesInstanceUID', 'no_series_uid'))
+                    p_dict = tree.setdefault(patient_key, {})
+                    st_dict = p_dict.setdefault(study_key, {})
+                    series_files = st_dict.setdefault(series_uid, [])
+                    series_files.append((file_path, str(series_num), series_desc, modality, orientation_key))
 
-            orientation_key = None
-            if hasattr(ds, 'ImageOrientationPatient'):
-                try:
-                    orientation_key = tuple(round(float(x), 4) for x in ds.ImageOrientationPatient)
-                except Exception:
-                    pass
-
-            p_dict = tree.setdefault(patient_key, {})
-            st_dict = p_dict.setdefault(study_key, {})
-            series_files = st_dict.setdefault(series_uid, [])
-            series_files.append((file_path, series_num, series_desc, modality, orientation_key))
-
-            if (idx + 1) % 10 == 0 or (idx + 1) == total_files:
-                self.logger.update_scan_progress(idx + 1, total_files)
+                    if scanned_done % scan_step == 0 or scanned_done == total_files:
+                        self.logger.update_scan_progress(scanned_done, total_files)
 
         final_tree = {}
         for (pat_name, pat_id), studies in tree.items():

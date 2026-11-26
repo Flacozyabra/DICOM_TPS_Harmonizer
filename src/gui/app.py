@@ -8,7 +8,7 @@ import urllib.request
 import re
 import math
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from PyQt6.QtCore import Qt, QObject, pyqtSignal, QSize, QPoint, QByteArray, QThread, QPointF, QRect, QEvent, QUrl
 from PyQt6.QtWidgets import (
@@ -89,7 +89,7 @@ class QtSignalBridge(QObject):
     progress_signal = pyqtSignal(int, int)      # current, total
     scan_progress_signal = pyqtSignal(int, int) # current, total
     finished_signal = pyqtSignal()
-    tree_scanned_signal = pyqtSignal(dict)
+    tree_scanned_signal = pyqtSignal(dict, dict, str)
 
 
 # Адаптер логгера для отправки сообщений через сигналы Qt
@@ -163,6 +163,8 @@ class DicomSplitterApp(QMainWindow):
         self.stop_event = threading.Event()
         self._is_updating_tree = False
         self.scan_dialog = None
+        self.scanned_header_cache: Dict[Path, dict] = {}
+        self.scanned_input_dir: str = ""
 
         # Состояние вьюера
         self.viewer_active = False
@@ -619,6 +621,7 @@ class DicomSplitterApp(QMainWindow):
 
         self.input_entry = QLineEdit()
         self.input_entry.setText(self.saved_input_path)
+        self.input_entry.textChanged.connect(self._invalidate_scan_cache)
         folder_layout.addWidget(self.input_entry, 0, 2)
 
         self.btn_open_in = QPushButton()
@@ -1270,7 +1273,14 @@ class DicomSplitterApp(QMainWindow):
         self.set_gui_enabled(True)
         self.log_textbox.moveCursor(QTextCursor.MoveOperation.End)
 
-    def on_tree_scanned(self, tree_data: dict) -> None:
+    def _invalidate_scan_cache(self) -> None:
+        """Clear cached scan headers whenever input folder changes."""
+        self.scanned_header_cache = {}
+        self.scanned_input_dir = ""
+
+    def on_tree_scanned(self, tree_data: dict, header_cache: Optional[dict] = None, scanned_dir: str = "") -> None:
+        self.scanned_header_cache = dict(header_cache) if header_cache else {}
+        self.scanned_input_dir = scanned_dir
         self.populate_tree(tree_data)
         self.scan_btn.setEnabled(True)
         self.scan_btn.setText(self.loc("scan_input"))
@@ -1472,6 +1482,7 @@ class DicomSplitterApp(QMainWindow):
             return
 
         self.log_textbox.clear()
+        self._invalidate_scan_cache()
         self.scan_btn.setEnabled(False)
         self.scan_btn.setText(self.loc("tree_loading"))
         self.selection_label.setText(self.loc("tree_loading"))
@@ -1494,10 +1505,10 @@ class DicomSplitterApp(QMainWindow):
         
         try:
             tree_data = processor.scan_input_directory()
-            self.bridge.tree_scanned_signal.emit(tree_data)
+            self.bridge.tree_scanned_signal.emit(tree_data, processor.header_cache, str(path.resolve()))
         except Exception as e:
             self.bridge.log_signal.emit(f"Error scanning directory: {e}", "error")
-            self.bridge.tree_scanned_signal.emit({})
+            self.bridge.tree_scanned_signal.emit({}, {}, "")
 
     def get_selected_files_or_autoscan(self) -> list:
         selected_files = self.get_selected_files()
@@ -1589,11 +1600,19 @@ class DicomSplitterApp(QMainWindow):
             exclude_localizers=self.cb_exclude_localizers.isChecked()
         )
 
+        resolved_in = str(input_dir.resolve())
+        header_cache = (
+            self.scanned_header_cache
+            if (not is_tree_hidden and self.scanned_input_dir == resolved_in)
+            else None
+        )
+
         logger = QtLogger(self.bridge)
         processor = DicomProcessor(
-            input_dir, output_dir, config, logger, self.stop_event, 
+            input_dir, output_dir, config, logger, self.stop_event,
             lang=self.current_lang, selected_files=selected_files,
-            patient_overrides=patient_overrides
+            patient_overrides=patient_overrides,
+            header_cache=header_cache,
         )
 
         threading.Thread(

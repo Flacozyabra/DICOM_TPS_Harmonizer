@@ -3,6 +3,7 @@ import threading
 import unittest
 from pathlib import Path
 from typing import List, Tuple
+from unittest import mock
 
 import numpy as np
 import pydicom
@@ -434,6 +435,78 @@ class ProcessorMultiframeTests(unittest.TestCase):
             # Missing input_dir returns cleanly without UnboundLocalError
             proc_missing, _ = self._run_processor(Path(tmpdir) / "nonexistent", out_dir, _default_config())
             self.assertEqual(proc_missing.success_count, 0)
+
+    def test_scan_populates_header_cache_and_process_skips_reread(self):
+        axial = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0)
+        sagittal = (0.0, 1.0, 0.0, 0.0, 0.0, -1.0)
+        study_uid = generate_uid()
+        series_uid = generate_uid()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            in_dir = Path(tmpdir) / "in"
+            out_dir = Path(tmpdir) / "out"
+            all_paths = []
+            for idx, (ori, pos) in enumerate([
+                (axial, (0.0, 0.0, 0.0)),
+                (axial, (0.0, 0.0, 5.0)),
+                (sagittal, (0.0, 0.0, 0.0)),
+                (sagittal, (5.0, 0.0, 0.0)),
+            ]):
+                ds, _ = build_enhanced_mr_dataset(
+                    [{"position": pos, "orientation": ori}],
+                    study_uid=study_uid,
+                    series_uid=series_uid,
+                    series_number=950,
+                    series_description="CACHE_TEST",
+                )
+                ds.NumberOfFrames = 1
+                ds.InstanceNumber = idx + 1
+                ds.ImagePositionPatient = list(pos)
+                ds.ImageOrientationPatient = list(ori)
+                p = in_dir / f"f_{idx}.dcm"
+                save_dataset(ds, p)
+                all_paths.append(p)
+
+            scan_logger = MemoryLogger()
+            scan_proc = DicomProcessor(
+                in_dir, out_dir, _default_config(split_series=True),
+                scan_logger, threading.Event(), lang="en",
+            )
+            tree = scan_proc.scan_input_directory()
+            self.assertEqual(len(scan_proc.header_cache), 4)
+            self.assertEqual(len(tree), 1)
+            studies = next(iter(tree.values()))
+            series_map = next(iter(studies.values()))
+            self.assertEqual(len(series_map), 2)  # Split into Seg1 and Seg2
+
+            # Full cache hit: must not invoke _read_header_task again
+            proc_logger = MemoryLogger()
+            proc = DicomProcessor(
+                in_dir, out_dir, _default_config(split_series=True),
+                proc_logger, threading.Event(), lang="en",
+                selected_files=all_paths, header_cache=scan_proc.header_cache,
+            )
+            with mock.patch("src.core.processor._read_header_task") as m_read:
+                proc.process()
+                m_read.assert_not_called()
+
+            self.assertEqual(proc.success_count, 4)
+            self.assertEqual(proc.error_count, 0)
+            self.assertTrue(any("Using cached DICOM headers (4 files)" in msg for _, msg in proc_logger.records))
+            self.assertFalse(any("Reading DICOM headers" in msg for _, msg in proc_logger.records))
+
+            # Partial cache: only uncached files are read from disk
+            partial_cache = {k: v for k, v in list(scan_proc.header_cache.items())[:3]}
+            out_dir_2 = Path(tmpdir) / "out2"
+            partial_logger = MemoryLogger()
+            proc_partial = DicomProcessor(
+                in_dir, out_dir_2, _default_config(split_series=True),
+                partial_logger, threading.Event(), lang="en",
+                selected_files=all_paths, header_cache=partial_cache,
+            )
+            proc_partial.process()
+            self.assertEqual(proc_partial.success_count, 4)
+            self.assertTrue(any("Reading DICOM headers (1 files)" in msg for _, msg in partial_logger.records))
 
 
 if __name__ == "__main__":
