@@ -22,7 +22,7 @@ from src.core.converter import (
     save_dicom_file,
 )
 from src.core.recovery import safe_dcmread
-from src.utils.helpers import as_int, make_safe_filename
+from src.utils.helpers import as_floats, as_int, compute_slice_location, make_safe_filename
 from src.utils.logger import BaseLogger
 
 # Маппинг модальностей в стандартные SOP Class UID для Monaco и Aria
@@ -268,6 +268,17 @@ def _process_batch_task(batch_task: dict) -> dict:
                 pixel_array = pixel_array[np.newaxis, ...]
 
             n_frames = int(ds_full.NumberOfFrames)
+            if pixel_array.shape[0] != n_frames:
+                results['status'] = 'error'
+                results['error_count'] += 1
+                series_errors += 1
+                results['logs'].append((
+                    'log_pixel_error',
+                    filename,
+                    f"Decoded {pixel_array.shape[0]} frame(s), expected {n_frames}",
+                ))
+                continue
+
             results['logs'].append(('log_split_multiframe', filename, n_frames))
 
             frames_meta, geo_warnings = extract_multiframe_frames(ds_full)
@@ -865,6 +876,22 @@ class DicomProcessor:
         series_folder = dest_dir.name
 
         used_names = self.dest_dir_used_names.setdefault(dest_dir, set())
+
+        # Sort items deterministically so thread completion order never scrambles InstanceNumber assignment
+        def _item_sort_key(item: tuple) -> tuple:
+            fp, ds_hdr = item
+            inst = as_int(ds_hdr.get('InstanceNumber'))
+            has_inst = 0 if inst is not None else 1
+            ipp = as_floats(ds_hdr.get('ImagePositionPatient'))
+            ori = as_floats(ds_hdr.get('ImageOrientationPatient'))
+            sl = (
+                compute_slice_location(ipp, ori)
+                if (ipp and ori)
+                else (ipp[2] if ipp and len(ipp) >= 3 else None)
+            )
+            return (has_inst, inst if inst is not None else 0, sl if sl is not None else 0.0, fp.name)
+
+        items = sorted(items, key=_item_sort_key)
 
         for file_path, ds_header in items:
             if series_uid_mapped not in self.series_counters:

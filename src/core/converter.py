@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 import numpy as np
 import pydicom
-from pydicom.dataset import Dataset, FileDataset
+from pydicom.dataset import Dataset, FileDataset, FileMetaDataset
 from pydicom.uid import generate_uid, ExplicitVRLittleEndian
 from pydicom.tag import Tag
 from src.core.config import ProcessingConfig
@@ -453,8 +453,9 @@ def clean_and_build_dataset(
             if element.tag not in excluded_tags:
                 new_ds[element.tag] = element
 
-    # Идентификаторы и метаданные
-    new_ds.SpecificCharacterSet = 'ISO_IR 100'
+    # Preserve original SpecificCharacterSet when valid; save_dicom_file upgrades to ISO_IR 192 if needed
+    orig_charset = getattr(src_ds, 'SpecificCharacterSet', None)
+    new_ds.SpecificCharacterSet = orig_charset if orig_charset else 'ISO_IR 100'
     new_ds.SOPClassUID = sop_class
     new_ds.SOPInstanceUID = generate_uid()
     new_ds.StudyInstanceUID = study_uid
@@ -469,15 +470,16 @@ def clean_and_build_dataset(
     # Геометрия матрицы
     new_ds.Rows = pixel_data.shape[0]
     new_ds.Columns = pixel_data.shape[1]
-    new_ds.SamplesPerPixel = getattr(src_ds, 'SamplesPerPixel', 1)
+    samples_per_pixel = int(getattr(src_ds, 'SamplesPerPixel', 1) or 1)
+    new_ds.SamplesPerPixel = samples_per_pixel
     new_ds.PhotometricInterpretation = getattr(src_ds, 'PhotometricInterpretation', 'MONOCHROME2')
     new_ds.BitsAllocated = getattr(src_ds, 'BitsAllocated', 16)
     new_ds.BitsStored = getattr(src_ds, 'BitsStored', 16)
     new_ds.HighBit = getattr(src_ds, 'HighBit', 15)
     new_ds.PixelRepresentation = getattr(src_ds, 'PixelRepresentation', 0)
 
-    # Принудительное приведение к 16-битному формату для Monaco TPS
-    if new_ds.BitsAllocated != 16:
+    # Force 16-bit grayscale format for Monaco TPS (do not corrupt 8-bit RGB images)
+    if samples_per_pixel == 1 and new_ds.BitsAllocated != 16:
         new_ds.BitsAllocated = 16
         new_ds.BitsStored = 16
         new_ds.HighBit = 15
@@ -527,10 +529,14 @@ def clean_and_build_dataset(
             new_ds.TableTopRollAngle = 0.0
 
     # Запись пикселей
-    if new_ds.PixelRepresentation == 1:
-        new_ds.PixelData = pixel_data.astype(np.int16).tobytes()
+    if new_ds.BitsAllocated == 8:
+        dtype = np.int8 if new_ds.PixelRepresentation == 1 else np.uint8
+        new_ds.PixelData = pixel_data.astype(dtype).tobytes()
+        new_ds['PixelData'].VR = 'OB'
     else:
-        new_ds.PixelData = pixel_data.astype(np.uint16).tobytes()
+        dtype = np.int16 if new_ds.PixelRepresentation == 1 else np.uint16
+        new_ds.PixelData = pixel_data.astype(dtype).tobytes()
+        new_ds['PixelData'].VR = 'OW'
 
     return new_ds
 
@@ -563,8 +569,9 @@ def clean_and_build_dataset_inplace(
                 del src_ds[tag]
 
 
-    # Идентификаторы и метаданные
-    src_ds.SpecificCharacterSet = 'ISO_IR 100'
+    # Preserve original SpecificCharacterSet when present; save_dicom_file upgrades to ISO_IR 192 if needed
+    orig_charset = getattr(src_ds, 'SpecificCharacterSet', None)
+    src_ds.SpecificCharacterSet = orig_charset if orig_charset else 'ISO_IR 100'
     src_ds.SOPClassUID = sop_class
     src_ds.SOPInstanceUID = generate_uid()
     src_ds.StudyInstanceUID = study_uid
@@ -575,10 +582,11 @@ def clean_and_build_dataset_inplace(
     if not hasattr(src_ds, 'ImageType') or not src_ds.ImageType:
         src_ds.ImageType = ['ORIGINAL', 'PRIMARY']
 
-    # Принудительное приведение к 16-битному формату для Monaco TPS
+    # Force 16-bit grayscale format for Monaco TPS (do not corrupt 8-bit RGB images)
     need_pixel_conversion = False
+    samples_per_pixel = int(getattr(src_ds, 'SamplesPerPixel', 1) or 1)
     bits_allocated = getattr(src_ds, 'BitsAllocated', 16)
-    if bits_allocated != 16:
+    if samples_per_pixel == 1 and bits_allocated != 16:
         src_ds.BitsAllocated = 16
         src_ds.BitsStored = 16
         src_ds.HighBit = 15
@@ -735,6 +743,60 @@ def copy_geometry_and_rescale(
             if calc_loc is not None:
                 new_ds.SliceLocation = calc_loc
 
+_CHARSET_CODECS = {
+    "ISO_IR 100": "latin_1",
+    "ISO_IR 101": "iso8859_2",
+    "ISO_IR 109": "iso8859_3",
+    "ISO_IR 110": "iso8859_4",
+    "ISO_IR 144": "iso8859_5",
+    "ISO_IR 127": "iso8859_6",
+    "ISO_IR 126": "iso8859_7",
+    "ISO_IR 138": "iso8859_8",
+    "ISO_IR 148": "iso8859_9",
+    "ISO_IR 192": "utf_8",
+}
+_TEXT_VRS = {"SH", "LO", "ST", "LT", "UT", "UC", "PN"}
+
+
+def _iter_text_strings(ds: Dataset):
+    """Yield string representations of text and PersonName elements recursively."""
+    for elem in ds:
+        if elem.VR == "SQ" and elem.value:
+            for item in elem.value:
+                for nested in _iter_text_strings(item):
+                    yield nested
+        elif elem.VR in _TEXT_VRS and elem.value is not None:
+            if isinstance(elem.value, (list, tuple)):
+                for part in elem.value:
+                    if part is not None:
+                        yield str(part)
+            else:
+                yield str(elem.value)
+
+
+def _ensure_encodable_charset(dataset: Dataset) -> None:
+    """Upgrade SpecificCharacterSet to UTF-8 (ISO_IR 192) if text cannot encode in the active charset."""
+    cs_raw = getattr(dataset, "SpecificCharacterSet", None)
+    if isinstance(cs_raw, (list, tuple)):
+        cs_name = str(cs_raw[0]).strip() if cs_raw else ""
+    else:
+        cs_name = str(cs_raw).strip() if cs_raw else ""
+
+    if cs_name == "ISO_IR 192":
+        return
+
+    codec = _CHARSET_CODECS.get(cs_name, "ascii" if not cs_name else None)
+    if codec is None:
+        return
+
+    for text in _iter_text_strings(dataset):
+        try:
+            text.encode(codec)
+        except UnicodeEncodeError:
+            dataset.SpecificCharacterSet = "ISO_IR 192"
+            return
+
+
 def save_dicom_file(out_path: Path, dataset: Dataset, explicit_vr: bool) -> None:
     """Сохраняет Dataset в файл DICOM на диске.
 
@@ -743,21 +805,24 @@ def save_dicom_file(out_path: Path, dataset: Dataset, explicit_vr: bool) -> None
         dataset: Сохраняемый Dataset.
         explicit_vr: Флаг сохранения в Explicit VR Little Endian.
     """
-    file_meta = Dataset()
+    _ensure_encodable_charset(dataset)
+
+    if 'PixelData' in dataset:
+        bits = int(getattr(dataset, 'BitsAllocated', 16) or 16)
+        dataset['PixelData'].VR = 'OB' if bits == 8 else 'OW'
+
+    file_meta = FileMetaDataset()
     file_meta.MediaStorageSOPClassUID = dataset.SOPClassUID
     file_meta.MediaStorageSOPInstanceUID = dataset.SOPInstanceUID
     file_meta.ImplementationClassUID = pydicom.uid.PYDICOM_IMPLEMENTATION_UID
-    
-    if explicit_vr:
-        file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
-        final_ds = FileDataset(str(out_path), dataset, file_meta=file_meta, preamble=b"\0" * 128)
-        final_ds.is_implicit_VR = False
-        final_ds.is_little_endian = True
-    else:
-        # Используем синтаксис по умолчанию (обычно Implicit VR Little Endian)
-        file_meta.TransferSyntaxUID = pydicom.uid.ImplicitVRLittleEndian
-        final_ds = FileDataset(str(out_path), dataset, file_meta=file_meta, preamble=b"\0" * 128)
-        final_ds.is_implicit_VR = True
-        final_ds.is_little_endian = True
+    file_meta.TransferSyntaxUID = (
+        ExplicitVRLittleEndian if explicit_vr else pydicom.uid.ImplicitVRLittleEndian
+    )
 
-    final_ds.save_as(str(out_path), write_like_original=False)
+    final_ds = FileDataset(str(out_path), dataset, file_meta=file_meta, preamble=b"\0" * 128)
+    try:
+        final_ds.save_as(str(out_path), enforce_file_format=True)
+    except TypeError:
+        final_ds.is_implicit_VR = not explicit_vr
+        final_ds.is_little_endian = True
+        final_ds.save_as(str(out_path), write_like_original=False)
