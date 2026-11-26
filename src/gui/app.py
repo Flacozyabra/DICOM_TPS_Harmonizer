@@ -29,7 +29,7 @@ from src.gui.widgets import LanguageSwitch, HUVerticalSlider, DicomViewerWidget,
 from src.gui.styles import THEMES, set_dark_titlebar, set_window_titlebar_theme, apply_dialog_theme
 
 
-APP_VERSION = "2.2.1"
+APP_VERSION = "2.3.0"
 
 DEFAULT_CHECKBOX_SETTINGS: Dict[str, bool] = {
     "new_uids": True,
