@@ -86,15 +86,13 @@ _TAG_DIMENSION_INDEX_VALUES = (0x0020, 0x9157)
 _TAG_DIMENSION_INDEX_POINTER = (0x0020, 0x9165)
 _TAG_DIFFUSION_B_VALUE = (0x0018, 0x9087)
 
-# Dimensions already handled explicitly or too granular for series splitting (gradient directions)
-_IGNORED_DIMENSIONS = {
-    _TAG_IN_STACK_POSITION,
-    _TAG_STACK_ID,
-    _TAG_TEMPORAL_INDEX,
-    _TAG_ECHO_NUMBERS,
-    _TAG_DIFFUSION_B_VALUE,
-    (0x0018, 0x9089),  # DiffusionGradientOrientation
-    (0x0018, 0x9079),  # DiffusionDirectionality
+# Allowlist of DimensionIndexPointer tags that legitimately distinguish separate 3D series.
+# Spatial, instance, timestamp, and gradient-direction indices must NOT split a 3D volume.
+_SERIES_SPLIT_DIMENSIONS = {
+    (0x0018, 0x9082),  # EffectiveEchoTime
+    (0x0018, 0x0082),  # InversionTime
+    (0x0018, 0x1314),  # FlipAngle
+    (0x0018, 0x0080),  # RepetitionTime
 }
 
 
@@ -163,12 +161,12 @@ def _extra_dimensions(
     pointers: Sequence[Tuple[int, int]],
     values: Optional[Sequence[int]],
 ) -> Tuple[Tuple[Tuple[int, int], int], ...]:
-    """Return dimension index pairs not already covered by explicit grouping keys."""
+    """Return allowlisted contrast/physics dimension index pairs for series grouping."""
     if not pointers or not values or len(pointers) != len(values):
         return ()
     extras: List[Tuple[Tuple[int, int], int]] = []
     for pointer, value in zip(pointers, values):
-        if pointer in _IGNORED_DIMENSIONS:
+        if pointer not in _SERIES_SPLIT_DIMENSIONS:
             continue
         extras.append((pointer, int(value)))
     return tuple(extras)
@@ -774,27 +772,34 @@ def _iter_text_strings(ds: Dataset):
                 yield str(elem.value)
 
 
+def _can_encode_all(texts: Sequence[str], codec: str) -> bool:
+    """Return True if every string in ``texts`` can be encoded with ``codec``."""
+    for text in texts:
+        try:
+            text.encode(codec)
+        except UnicodeEncodeError:
+            return False
+    return True
+
+
 def _ensure_encodable_charset(dataset: Dataset) -> None:
-    """Upgrade SpecificCharacterSet to UTF-8 (ISO_IR 192) if text cannot encode in the active charset."""
+    """Prefer ISO_IR 100 for Monaco compatibility when Latin-1 suffices; upgrade only for non-Latin-1 text."""
+    texts = list(_iter_text_strings(dataset))
+    if _can_encode_all(texts, "latin_1"):
+        dataset.SpecificCharacterSet = "ISO_IR 100"
+        return
+
     cs_raw = getattr(dataset, "SpecificCharacterSet", None)
     if isinstance(cs_raw, (list, tuple)):
         cs_name = str(cs_raw[0]).strip() if cs_raw else ""
     else:
         cs_name = str(cs_raw).strip() if cs_raw else ""
 
-    if cs_name == "ISO_IR 192":
+    codec = _CHARSET_CODECS.get(cs_name)
+    if codec and _can_encode_all(texts, codec):
         return
 
-    codec = _CHARSET_CODECS.get(cs_name, "ascii" if not cs_name else None)
-    if codec is None:
-        return
-
-    for text in _iter_text_strings(dataset):
-        try:
-            text.encode(codec)
-        except UnicodeEncodeError:
-            dataset.SpecificCharacterSet = "ISO_IR 192"
-            return
+    dataset.SpecificCharacterSet = "ISO_IR 192"
 
 
 def save_dicom_file(out_path: Path, dataset: Dataset, explicit_vr: bool) -> None:

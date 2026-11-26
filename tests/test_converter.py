@@ -267,8 +267,9 @@ class ConverterTests(unittest.TestCase):
             self.assertEqual(str(reloaded.PatientName), "Иванов^Иван")
             self.assertEqual(str(reloaded.SeriesDescription), "Т2_аксиал")
 
-            # ASCII dataset must retain ISO_IR 100
+            # ASCII dataset must normalize even ISO_IR 192 back to ISO_IR 100 for Monaco SCP compatibility
             ds_asc, px_asc = build_enhanced_mr_dataset(frame_specs, patient_name="Doe^John", series_description="T2_AX")
+            ds_asc.SpecificCharacterSet = "ISO_IR 192"
             out_asc = Path(tmpdir) / "asc.dcm"
             built_asc = clean_and_build_dataset(
                 ds_asc, px_asc[0], 1, generate_uid(), generate_uid(), CLASSIC_MR_SOP_CLASS, generate_uid(), cfg
@@ -276,6 +277,35 @@ class ConverterTests(unittest.TestCase):
             save_dicom_file(out_asc, built_asc, explicit_vr=True)
             reloaded_asc = pydicom.dcmread(str(out_asc))
             self.assertEqual(reloaded_asc.SpecificCharacterSet, "ISO_IR 100")
+
+    def test_spatial_and_timestamp_dimension_pointers_do_not_split_3d_series(self):
+        axial = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0)
+        frame_specs = [
+            {
+                "position": (0.0, 0.0, 0.0),
+                "orientation": axial,
+                "stack_id": "1",
+                "in_stack_position": 1,
+                "dimension_values": (1, 1, 1),
+            },
+            {
+                "position": (0.0, 0.0, 2.5),
+                "orientation": axial,
+                "stack_id": "1",
+                "in_stack_position": 2,
+                "dimension_values": (2, 2, 2),
+            },
+        ]
+        # Siemens/GE may index ImagePositionPatient (0020,0032), InstanceNumber (0020,0013),
+        # or FrameAcquisitionDateTime (0018,9074) inside DimensionIndexSequence
+        ds, _ = build_enhanced_mr_dataset(
+            frame_specs,
+            dimension_pointers=((0x0020, 0x0032), (0x0020, 0x0013), (0x0018, 0x9074)),
+        )
+        frames, _ = extract_multiframe_frames(ds)
+        self.assertEqual(frames[0].extra_dimensions, ())
+        self.assertEqual(frames[1].extra_dimensions, ())
+        self.assertEqual(frames[0].group_key(), frames[1].group_key())
 
     def test_rgb_8bit_image_preserves_8bit_and_pixels(self):
         ds, _ = build_enhanced_mr_dataset(
