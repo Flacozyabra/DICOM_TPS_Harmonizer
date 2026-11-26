@@ -1,10 +1,14 @@
+import hashlib
 import os
+import ssl
 import sys
 import json
 import time
 import shutil
+import urllib.error
 import urllib.request
 import subprocess
+from typing import Dict, Optional
 
 from PyQt6.QtCore import QThread, pyqtSignal, Qt
 from PyQt6.QtWidgets import (
@@ -16,6 +20,35 @@ from src.gui.styles import apply_dialog_theme, set_window_titlebar_theme
 
 DEFAULT_REPO = "Flacozyabra/DICOM_TPS_Harmonizer"
 _active_workers = set()
+_LAST_ASSET_DIGESTS: Dict[str, str] = {}
+
+
+def _open_url_with_tls_fallback(req: urllib.request.Request, timeout: int):
+    """Open URL with strict TLS verification, falling back to CERT_NONE only on SSLError."""
+    try:
+        return urllib.request.urlopen(req, timeout=timeout)
+    except ssl.SSLError:
+        pass
+    except urllib.error.URLError as exc:
+        if not isinstance(getattr(exc, "reason", None), ssl.SSLError):
+            raise
+
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return urllib.request.urlopen(req, timeout=timeout, context=ctx)
+
+
+def verify_file_sha256(file_path: str, expected_hex: str) -> bool:
+    """Verify that the SHA-256 digest of ``file_path`` matches ``expected_hex``."""
+    digest = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        while True:
+            chunk = f.read(65536)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest().lower() == expected_hex.strip().lower()
 
 
 def tr(parent: QWidget, key: str, default_ru: str, default_en: str, *args) -> str:
@@ -65,21 +98,11 @@ def check_github_updates(repo_name: str = DEFAULT_REPO) -> tuple:
     
     Returns (latest_tag_name, html_url, assets_dict) or (None, None, None).
     """
-    import ssl
     url = f"https://api.github.com/repos/{repo_name}/releases/latest"
     req = urllib.request.Request(url, headers={"User-Agent": "PyQt-App-Updater"})
 
-    ctx = None
     try:
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-    except Exception:
-        pass
-
-    try:
-        open_kwargs = {"context": ctx} if ctx else {}
-        with urllib.request.urlopen(req, timeout=10, **open_kwargs) as response:
+        with _open_url_with_tls_fallback(req, timeout=10) as response:
             data = json.loads(response.read().decode("utf-8"))
             tag_name = data.get("tag_name", "")
             html_url = data.get("html_url", f"https://github.com/{repo_name}/releases")
@@ -90,6 +113,9 @@ def check_github_updates(repo_name: str = DEFAULT_REPO) -> tuple:
                 download_url = asset.get("browser_download_url", "")
                 if name and download_url:
                     assets_dict[name] = download_url
+                    digest_str = asset.get("digest", "")
+                    if isinstance(digest_str, str) and digest_str.lower().startswith("sha256:"):
+                        _LAST_ASSET_DIGESTS[download_url] = digest_str.split(":", 1)[1].strip().lower()
 
             return tag_name, html_url, assets_dict
     except Exception as e:
@@ -344,35 +370,32 @@ class FileDownloadWorker(QThread):
     finished = pyqtSignal(str)
     error = pyqtSignal(str)
 
-    def __init__(self, url: str, dest_path: str, parent: QWidget = None):
+    def __init__(
+        self,
+        url: str,
+        dest_path: str,
+        parent: QWidget = None,
+        expected_sha256: Optional[str] = None,
+    ):
         super().__init__(parent)
         self.url = url
         self.dest_path = dest_path
+        self.expected_sha256 = expected_sha256
         self.is_cancelled = False
 
     def cancel(self):
         self.is_cancelled = True
 
     def run(self):
-        import ssl
         max_retries = 3
         retry_delay = 2
-
-        ctx = None
-        try:
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-        except Exception:
-            pass
 
         for attempt in range(max_retries):
             if self.is_cancelled:
                 return
             try:
                 req = urllib.request.Request(self.url, headers={"User-Agent": "PyQt-App-Updater"})
-                open_kwargs = {"context": ctx} if ctx else {}
-                with urllib.request.urlopen(req, timeout=30, **open_kwargs) as response:
+                with _open_url_with_tls_fallback(req, timeout=30) as response:
                     total_size = int(response.info().get("Content-Length", 0))
                     bytes_downloaded = 0
                     block_size = 1024 * 16
@@ -419,6 +442,15 @@ class FileDownloadWorker(QThread):
                             self.progress.emit(percent, speed_str, bytes_downloaded, total_size)
 
                 if not self.is_cancelled:
+                    if self.expected_sha256 and not verify_file_sha256(self.dest_path, self.expected_sha256):
+                        try:
+                            if os.path.exists(self.dest_path):
+                                os.remove(self.dest_path)
+                        except Exception:
+                            pass
+                        self.error.emit("SHA-256 checksum mismatch for downloaded update.")
+                        self.finished.emit("")
+                        return
                     self.progress.emit(100, speed_str, bytes_downloaded, total_size)
                     self.finished.emit(self.dest_path)
                 return
@@ -473,7 +505,8 @@ def run_auto_update(parent: QWidget, latest_version: str, assets: dict) -> None:
     progress_dialog = DownloadProgressDialog(parent)
     progress_dialog.show()
 
-    worker = FileDownloadWorker(download_url, temp_exe_path, parent)
+    expected_sha256 = _LAST_ASSET_DIGESTS.get(download_url)
+    worker = FileDownloadWorker(download_url, temp_exe_path, parent, expected_sha256=expected_sha256)
     _active_workers.add(worker)
 
     def on_progress(percent: int, speed: str, downloaded: int, total: int):

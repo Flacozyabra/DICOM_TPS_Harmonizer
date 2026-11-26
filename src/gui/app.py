@@ -10,7 +10,7 @@ import math
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
-from PyQt6.QtCore import Qt, QObject, pyqtSignal, QSize, QPoint, QByteArray, QThread, QPointF, QRect, QEvent
+from PyQt6.QtCore import Qt, QObject, pyqtSignal, QSize, QPoint, QByteArray, QThread, QPointF, QRect, QEvent, QUrl
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFrame,
     QLabel, QPushButton, QLineEdit, QCheckBox, QProgressBar,
@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
     QGridLayout, QMessageBox, QApplication, QSplitter, QSizePolicy,
     QSlider, QStackedWidget, QComboBox
 )
-from PyQt6.QtGui import QIcon, QFont, QTextCursor, QPixmap, QBrush, QColor, QPainter, QPen, QImage, QLinearGradient, QPolygon, QDragEnterEvent, QDropEvent, QDragMoveEvent, QPainterPath
+from PyQt6.QtGui import QIcon, QFont, QTextCursor, QPixmap, QBrush, QColor, QPainter, QPen, QImage, QLinearGradient, QPolygon, QDragEnterEvent, QDropEvent, QDragMoveEvent, QPainterPath, QDesktopServices
 
 from src.core.config import ProcessingConfig
 from src.core.processor import DicomProcessor
@@ -27,6 +27,57 @@ from src.utils.updater import UpdateCheckWorker, is_newer_version, run_auto_upda
 from src.gui.dialogs import CustomQuestionDialog, UpdateDialog, PatientEditDialog, ScanProgressDialog
 from src.gui.widgets import LanguageSwitch, HUVerticalSlider, DicomViewerWidget, DicomViewerPanel, CustomSplitter
 from src.gui.styles import THEMES, set_dark_titlebar, set_window_titlebar_theme, apply_dialog_theme
+
+
+APP_VERSION = "2.2.1"
+
+DEFAULT_CHECKBOX_SETTINGS: Dict[str, bool] = {
+    "new_uids": True,
+    "split_multiframe": True,
+    "clean_tags": True,
+    "default_tags": True,
+    "explicit_vr": True,
+    "exclude_reports": True,
+    "split_series": True,
+    "exclude_localizers": True,
+}
+
+
+def load_user_config(config_file: Path) -> Dict[str, Any]:
+    """Load JSON configuration dictionary safely from ``config_file``."""
+    if config_file.exists():
+        try:
+            with open(config_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    return data
+        except Exception:
+            pass
+    return {}
+
+
+def save_user_config(config_file: Path, updates: Dict[str, Any]) -> None:
+    """Merge ``updates`` into ``config_file`` JSON safely."""
+    config_data = load_user_config(config_file)
+    config_data.update(updates)
+    try:
+        config_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(config_file, "w", encoding="utf-8") as f:
+            json.dump(config_data, f, ensure_ascii=False, indent=4)
+    except Exception:
+        pass
+
+
+def load_checkbox_settings(config_file: Path) -> Dict[str, bool]:
+    """Load saved optimization checkbox states with defaults for missing keys."""
+    settings = dict(DEFAULT_CHECKBOX_SETTINGS)
+    data = load_user_config(config_file)
+    saved = data.get("processing_settings")
+    if isinstance(saved, dict):
+        for key in DEFAULT_CHECKBOX_SETTINGS:
+            if key in saved and isinstance(saved[key], bool):
+                settings[key] = saved[key]
+    return settings
 
 
 
@@ -88,8 +139,9 @@ class DicomSplitterApp(QMainWindow):
 
         self.THEMES = THEMES
 
-        # Загрузка путей и языка
+        # Загрузка путей, языка и настроек чекбоксов
         saved_input, saved_output, saved_lang, saved_theme = self.load_last_paths()
+        self.saved_checkbox_settings = load_checkbox_settings(self.get_config_path())
         self.current_lang = saved_lang
         self.current_theme = saved_theme
         
@@ -117,6 +169,8 @@ class DicomSplitterApp(QMainWindow):
         self.current_view_series_uid = None
         self.current_view_seg_idx = None
 
+        self.VERSION = APP_VERSION
+
         # Создание интерфейса
         self.create_widgets()
         self.install_drag_drop_filters(self)
@@ -125,7 +179,6 @@ class DicomSplitterApp(QMainWindow):
         self.center_on_screen()
         self.restore_window_state()
 
-        self.VERSION = "2.2.1"
         self.check_updates()
 
     def check_updates(self) -> None:
@@ -169,37 +222,11 @@ class DicomSplitterApp(QMainWindow):
 
     def save_skipped_version(self, version: str) -> None:
         """Сохраняет версию, которую пользователь решил пропустить, в config.json."""
-        config_file = self.get_config_path()
-        config_data = {}
-        if config_file.exists():
-            try:
-                with open(config_file, "r", encoding="utf-8") as f:
-                    config_data = json.load(f)
-            except Exception:
-                pass
-        config_data["skipped_version"] = version
-        try:
-            with open(config_file, "w", encoding="utf-8") as f:
-                json.dump(config_data, f, ensure_ascii=False, indent=4)
-        except Exception:
-            pass
+        save_user_config(self.get_config_path(), {"skipped_version": version})
 
     def save_skip_update_check(self) -> None:
         """Сохраняет флаг отключения проверки обновлений в config.json."""
-        config_file = self.get_config_path()
-        config_data = {}
-        if config_file.exists():
-            try:
-                with open(config_file, "r", encoding="utf-8") as f:
-                    config_data = json.load(f)
-            except Exception:
-                pass
-        config_data["skip_update_check"] = True
-        try:
-            with open(config_file, "w", encoding="utf-8") as f:
-                json.dump(config_data, f, ensure_ascii=False, indent=4)
-        except Exception:
-            pass
+        save_user_config(self.get_config_path(), {"skip_update_check": True})
 
     def get_config_path(self) -> Path:
         """Возвращает путь к файлу конфигурации в AppData пользователя."""
@@ -212,10 +239,10 @@ class DicomSplitterApp(QMainWindow):
         return config_dir / "config.json"
 
     def generate_theme_arrows(self, color_right_hex: str, color_down_hex: str) -> Tuple[str, str]:
-        themes_dir = self.project_root / "themes"
-        themes_dir.mkdir(exist_ok=True)
-        path_right = themes_dir / "arrow_right_theme.png"
-        path_down = themes_dir / "arrow_down_theme.png"
+        themes_cache_dir = self.get_config_path().parent / "themes_cache"
+        themes_cache_dir.mkdir(parents=True, exist_ok=True)
+        path_right = themes_cache_dir / "arrow_right_theme.png"
+        path_down = themes_cache_dir / "arrow_down_theme.png"
         try:
             from PyQt6.QtGui import QPixmap, QPainter, QPen, QColor, QPolygonF
             from PyQt6.QtCore import Qt, QPointF
@@ -267,92 +294,65 @@ class DicomSplitterApp(QMainWindow):
         set_dark_titlebar(self)
 
     def load_last_paths(self) -> Tuple[str, str, str, str]:
-        config_file = self.get_config_path()
-        inp = "Введите путь для папки Dicom_input"
-        out = "Введите путь для папки Dicom_output"
-        lang = "ru"
-        theme = "dark"
-        
-        if config_file.exists():
-            try:
-                with open(config_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    inp_val = data.get("input_dir", "")
-                    out_val = data.get("output_dir", "")
-                    lang_val = data.get("language", "ru")
-                    theme_val = data.get("theme", "dark")
-                    if inp_val:
-                        inp = inp_val
-                    if out_val:
-                        out = out_val
-                    if lang_val:
-                        lang = lang_val
-                    if theme_val:
-                        theme = theme_val
-            except Exception:
-                pass
+        data = load_user_config(self.get_config_path())
+        inp = data.get("input_dir") or "Введите путь для папки Dicom_input"
+        out = data.get("output_dir") or "Введите путь для папки Dicom_output"
+        lang = data.get("language") or "ru"
+        theme = data.get("theme") or "dark"
         return inp, out, lang, theme
+
+    def on_checkbox_setting_changed(self, *_args) -> None:
+        """Persist checkbox settings immediately when any optimization option toggles."""
+        self.save_last_paths()
 
     def save_last_paths(self) -> None:
         inp = self.input_entry.text()
         out = self.output_entry.text()
-        lang = self.current_lang
-        theme = self.current_theme
-        
-        config_data = {}
-        config_file = self.get_config_path()
-        
-        if config_file.exists():
-            try:
-                with open(config_file, "r", encoding="utf-8") as f:
-                    config_data = json.load(f)
-            except Exception:
-                pass
-                
+        updates: Dict[str, Any] = {
+            "language": self.current_lang,
+            "theme": self.current_theme,
+            "window_geometry": self.saveGeometry().toHex().data().decode('utf-8'),
+        }
+
         if "Введите путь" not in inp and "Enter path" not in inp:
-            config_data["input_dir"] = inp
+            updates["input_dir"] = inp
         if "Введите путь" not in out and "Enter path" not in out:
-            config_data["output_dir"] = out
-            
-        config_data["language"] = lang
-        config_data["theme"] = theme
-        
-        # Сохраняем геометрию главного окна и состояние сплиттеров
-        config_data["window_geometry"] = self.saveGeometry().toHex().data().decode('utf-8')
+            updates["output_dir"] = out
+
         if hasattr(self, "splitter"):
-            config_data["splitter_state"] = self.splitter.saveState().toHex().data().decode('utf-8')
+            updates["splitter_state"] = self.splitter.saveState().toHex().data().decode('utf-8')
         if hasattr(self, "right_splitter"):
-            config_data["right_splitter_state"] = self.right_splitter.saveState().toHex().data().decode('utf-8')
-        
-        try:
-            with open(config_file, "w", encoding="utf-8") as f:
-                json.dump(config_data, f, ensure_ascii=False, indent=4)
-        except Exception:
-            pass
+            updates["right_splitter_state"] = self.right_splitter.saveState().toHex().data().decode('utf-8')
+        if hasattr(self, "checkbox_map"):
+            updates["processing_settings"] = {
+                key: cb.isChecked() for key, cb in self.checkbox_map.items()
+            }
+
+        save_user_config(self.get_config_path(), updates)
 
     def restore_window_state(self) -> None:
-        config_file = self.get_config_path()
-        if config_file.exists():
-            try:
-                with open(config_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    
-                    # Восстановление геометрии главного окна
-                    geom_hex = data.get("window_geometry", "")
-                    if geom_hex:
-                        self.restoreGeometry(QByteArray.fromHex(geom_hex.encode('utf-8')))
-                        
-                    # Восстановление состояния сплиттера
-                    state_hex = data.get("splitter_state", "")
-                    if state_hex and hasattr(self, "splitter"):
-                        self.splitter.restoreState(QByteArray.fromHex(state_hex.encode('utf-8')))
+        data = load_user_config(self.get_config_path())
+        if not data:
+            return
+        try:
+            # Восстановление геометрии главного окна (с проверкой видимости на активных экранах)
+            geom_hex = data.get("window_geometry", "")
+            if geom_hex:
+                self.restoreGeometry(QByteArray.fromHex(geom_hex.encode('utf-8')))
+                frame = self.frameGeometry()
+                screens = QApplication.screens()
+                if screens and not any(s.availableGeometry().intersects(frame) for s in screens):
+                    self.center_on_screen()
 
-                    # Восстановление состояния вертикального сплиттера
-                    right_state_hex = data.get("right_splitter_state", "")
-                    if right_state_hex and hasattr(self, "right_splitter"):
-                        self.right_splitter.restoreState(QByteArray.fromHex(right_state_hex.encode('utf-8')))
-            except Exception:
-                pass
+            state_hex = data.get("splitter_state", "")
+            if state_hex and hasattr(self, "splitter"):
+                self.splitter.restoreState(QByteArray.fromHex(state_hex.encode('utf-8')))
+
+            right_state_hex = data.get("right_splitter_state", "")
+            if right_state_hex and hasattr(self, "right_splitter"):
+                self.right_splitter.restoreState(QByteArray.fromHex(right_state_hex.encode('utf-8')))
+        except Exception:
+            pass
 
     def center_on_screen(self) -> None:
         """Центрирует окно приложения на первичном экране."""
@@ -409,7 +409,8 @@ class DicomSplitterApp(QMainWindow):
             self.lang_switch.update_slider_position()
 
     def update_locale_texts(self) -> None:
-        self.setWindowTitle(self.loc("title"))
+        title_tpl = self.loc("title")
+        self.setWindowTitle(title_tpl.format(self.VERSION) if "{}" in title_tpl else f"{self.loc('title_label')} v{self.VERSION}")
         self.title_label.setText(self.loc("title_label"))
         self.input_label.setText(self.loc("input_folder"))
         self.output_label.setText(self.loc("output_folder"))
@@ -671,36 +672,42 @@ class DicomSplitterApp(QMainWindow):
         settings_layout.addWidget(self.settings_title, 0, 0, 1, 2)
 
         self.cb_new_uids = QCheckBox()
-        self.cb_new_uids.setChecked(True)
         settings_layout.addWidget(self.cb_new_uids, 1, 0)
 
         self.cb_split_mf = QCheckBox()
-        self.cb_split_mf.setChecked(True)
         settings_layout.addWidget(self.cb_split_mf, 1, 1)
 
         self.cb_clean_tags = QCheckBox()
-        self.cb_clean_tags.setChecked(True)
         settings_layout.addWidget(self.cb_clean_tags, 2, 0)
 
         self.cb_default_tags = QCheckBox()
-        self.cb_default_tags.setChecked(True)
         settings_layout.addWidget(self.cb_default_tags, 2, 1)
 
         self.cb_explicit_vr = QCheckBox()
-        self.cb_explicit_vr.setChecked(True)
         settings_layout.addWidget(self.cb_explicit_vr, 3, 0)
 
         self.cb_exclude_reports = QCheckBox()
-        self.cb_exclude_reports.setChecked(True)
         settings_layout.addWidget(self.cb_exclude_reports, 3, 1)
 
         self.cb_split_series = QCheckBox()
-        self.cb_split_series.setChecked(True)
         settings_layout.addWidget(self.cb_split_series, 4, 0)
 
         self.cb_exclude_localizers = QCheckBox()
-        self.cb_exclude_localizers.setChecked(True)
         settings_layout.addWidget(self.cb_exclude_localizers, 4, 1)
+
+        self.checkbox_map = {
+            "new_uids": self.cb_new_uids,
+            "split_multiframe": self.cb_split_mf,
+            "clean_tags": self.cb_clean_tags,
+            "default_tags": self.cb_default_tags,
+            "explicit_vr": self.cb_explicit_vr,
+            "exclude_reports": self.cb_exclude_reports,
+            "split_series": self.cb_split_series,
+            "exclude_localizers": self.cb_exclude_localizers,
+        }
+        for key, cb in self.checkbox_map.items():
+            cb.setChecked(bool(self.saved_checkbox_settings.get(key, True)))
+            cb.stateChanged.connect(self.on_checkbox_setting_changed)
 
 
 
@@ -1137,16 +1144,22 @@ class DicomSplitterApp(QMainWindow):
             self.output_entry.setText(str(Path(dir_path).resolve()))
             self.save_last_paths()
 
+    def _open_directory(self, path: Path) -> None:
+        """Open a directory in the system file manager across platforms."""
+        if sys.platform.startswith("win"):
+            os.startfile(str(path))
+        else:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.resolve())))
+
     def open_input_dir(self) -> None:
         inp_dir = self.input_entry.text()
         if "Введите путь" in inp_dir or "Enter path" in inp_dir:
             self.bridge.log_signal.emit(self.loc("error_input_path_not_set"), "error")
             return
-            
+
         path = Path(inp_dir)
         if path.exists():
-            import os
-            os.startfile(path)
+            self._open_directory(path)
         else:
             self.bridge.log_signal.emit(self.loc("error_input_not_exist_warning", path), "warning")
 
@@ -1155,11 +1168,10 @@ class DicomSplitterApp(QMainWindow):
         if "Введите путь" in out_dir or "Enter path" in out_dir:
             self.bridge.log_signal.emit(self.loc("error_output_path_not_set"), "error")
             return
-            
+
         path = Path(out_dir)
         if path.exists():
-            import os
-            os.startfile(path)
+            self._open_directory(path)
         else:
             self.bridge.log_signal.emit(self.loc("error_output_not_exist", path), "warning")
 
@@ -1272,7 +1284,12 @@ class DicomSplitterApp(QMainWindow):
                 study_item.setCheckState(0, Qt.CheckState.Checked)
                 study_item.setData(0, Qt.ItemDataRole.UserRole, ("study", study_uid))
                 
-                for (series_label, s_uid, seg_idx), files in sorted(series_dict.items(), key=lambda x: str(x[0])):
+                def _series_sort_key(entry: tuple) -> Tuple[int, str]:
+                    label = str(entry[0][0])
+                    m = re.match(r"Series\s+(-?\d+)\s*:", label)
+                    return (int(m.group(1)) if m else 10**9, label)
+
+                for (series_label, s_uid, seg_idx), files in sorted(series_dict.items(), key=_series_sort_key):
                     # Серия
                     series_item = QTreeWidgetItem(study_item)
                     series_item.setText(0, series_label)
