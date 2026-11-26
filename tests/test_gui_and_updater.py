@@ -185,6 +185,43 @@ class GuiAndUpdaterTests(unittest.TestCase):
                 _open_url_with_tls_fallback(req, timeout=5)
             self.assertEqual(m_open.call_count, 1)
 
+    def test_build_spec_excludes_unused_qt_opengl_binaries(self):
+        from build_PyQt6 import _inject_spec_binary_exclusions
+
+        sample_spec = (
+            "# -*- mode: python ; coding: utf-8 -*-\n"
+            "a = Analysis(['main.py'])\n"
+            "pyz = PYZ(a.pure)\n"
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            spec_path = Path(tmpdir) / "app.spec"
+            spec_path.write_text(sample_spec, encoding="utf-8")
+            _inject_spec_binary_exclusions(spec_path)
+            patched = spec_path.read_text(encoding="utf-8")
+
+            class _FakeAnalysis:
+                binaries = [
+                    ("PyQt5\\Qt5\\bin\\opengl32sw.dll", "x", "BINARY"),
+                    ("PyQt6\\Qt6\\bin\\d3dcompiler_47.dll", "y", "BINARY"),
+                    ("PyQt5\\Qt5\\bin\\Qt5Core.dll", "z", "BINARY"),
+                    ("PyQt5/Qt5/plugins/platforms/qwindows.dll", "w", "BINARY"),
+                ]
+                pure = []
+
+            ns = {
+                "Analysis": lambda *args, **kwargs: _FakeAnalysis(),
+                "PYZ": lambda pure: None,
+            }
+            exec(compile(patched, str(spec_path), "exec"), ns)
+            kept = [item[0] for item in ns["a"].binaries]
+            self.assertEqual(
+                kept,
+                [
+                    "PyQt5\\Qt5\\bin\\Qt5Core.dll",
+                    "PyQt5/Qt5/plugins/platforms/qwindows.dll",
+                ],
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

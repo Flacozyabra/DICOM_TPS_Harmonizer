@@ -108,6 +108,37 @@ def _collect_pydicom_submodules(python_exe: str) -> Sequence[str]:
     return [line.strip() for line in res.stdout.splitlines() if line.strip()]
 
 
+EXCLUDED_QT_BINARIES: Tuple[str, ...] = (
+    "opengl32sw.dll",
+    "libglesv2.dll",
+    "libegl.dll",
+    "d3dcompiler_47.dll",
+)
+
+
+def _inject_spec_binary_exclusions(
+    spec_path: Path,
+    excluded_binaries: Iterable[str] = EXCLUDED_QT_BINARIES,
+) -> None:
+    """Filter unused Qt OpenGL/ANGLE binaries out of a generated PyInstaller .spec file."""
+    excluded = tuple(sorted({name.lower() for name in excluded_binaries if name}))
+    if not excluded:
+        return
+
+    content = spec_path.read_text(encoding="utf-8")
+    filter_block = (
+        f"_EXCLUDED_BINARY_NAMES = {excluded!r}\n"
+        "a.binaries = [\n"
+        "    item for item in a.binaries\n"
+        "    if item[0].replace('\\\\', '/').rsplit('/', 1)[-1].lower() not in _EXCLUDED_BINARY_NAMES\n"
+        "]\n\n"
+    )
+    marker = "pyz = PYZ("
+    if marker not in content:
+        raise RuntimeError(f"Expected marker {marker!r} not found in generated spec: {spec_path}")
+    spec_path.write_text(content.replace(marker, filter_block + marker, 1), encoding="utf-8")
+
+
 def run_pyinstaller_build(
     *,
     exe_name: str,
@@ -135,14 +166,13 @@ def run_pyinstaller_build(
     locales_dir = root_dir / "locales"
     main_script = root_dir / "main.py"
 
-    args = [
+    spec_args = [
         python_exe,
         "-m",
-        "PyInstaller",
-        "--noconfirm",
-        "--clean",
+        "PyInstaller.utils.cliutils.makespec",
         "--onefile",
         "--windowed",
+        "--noupx",
         f"--specpath={build_dir}",
         f"--paths={root_dir}",
         f"--add-data={themes_dir};themes",
@@ -152,14 +182,14 @@ def run_pyinstaller_build(
 
     icon_path = themes_dir / "app_icon.ico"
     if icon_path.exists():
-        args.append(f"--icon={icon_path}")
+        spec_args.append(f"--icon={icon_path}")
     else:
         print(f"[WARNING] Icon not found at {icon_path}; building with default icon.")
 
     for dll_name in runtime_dlls:
         dll_path = _find_runtime_dll(python_exe, dll_name)
         if dll_path:
-            args.append(f"--add-binary={dll_path};.")
+            spec_args.append(f"--add-binary={dll_path};.")
             print(f"[INFO] Bundling runtime DLL: {dll_path}")
         else:
             print(f"[WARNING] Runtime DLL not found: {dll_name}")
@@ -167,13 +197,13 @@ def run_pyinstaller_build(
     pydicom_subs = _collect_pydicom_submodules(python_exe)
     print(f"[INFO] Collected {len(pydicom_subs)} pydicom submodules.")
     for mod in pydicom_subs:
-        args.append(f"--hidden-import={mod}")
+        spec_args.append(f"--hidden-import={mod}")
 
     for pkg in ("pylibjpeg", "libjpeg", "openjpeg"):
-        args.append(f"--collect-all={pkg}")
+        spec_args.append(f"--collect-all={pkg}")
 
     for mod in ("unicodedata", "PIL", *extra_hidden_imports):
-        args.append(f"--hidden-import={mod}")
+        spec_args.append(f"--hidden-import={mod}")
 
     for mod in (
         exclude_qt,
@@ -182,12 +212,27 @@ def run_pyinstaller_build(
         f"{exclude_qt}.QtWidgets",
         f"{exclude_qt}.sip",
     ):
-        args.append(f"--exclude-module={mod}")
+        spec_args.append(f"--exclude-module={mod}")
 
-    args.append(str(main_script))
+    spec_args.append(str(main_script))
 
-    print(f"[INFO] Build command:\n{' '.join(args)}")
-    subprocess.check_call(args)
+    print(f"[INFO] Spec command:\n{' '.join(spec_args)}")
+    subprocess.check_call(spec_args)
+
+    spec_path = build_dir / f"{exe_name}.spec"
+    _inject_spec_binary_exclusions(spec_path)
+    print(f"[INFO] Patched {spec_path.name} to exclude unused Qt binaries: {', '.join(EXCLUDED_QT_BINARIES)}")
+
+    build_args = [
+        python_exe,
+        "-m",
+        "PyInstaller",
+        "--noconfirm",
+        "--clean",
+        str(spec_path),
+    ]
+    print(f"[INFO] Build command:\n{' '.join(build_args)}")
+    subprocess.check_call(build_args)
 
     exe_path = Path("dist") / f"{exe_name}.exe"
     print_banner(f"BUILD COMPLETE: {exe_path}")

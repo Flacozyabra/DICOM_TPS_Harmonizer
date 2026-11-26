@@ -24,7 +24,7 @@ def main() -> None:
             exe_name="DICOM_TPS_Harmonizer_Legacy",
             qt_backend="PyQt5",
             exclude_qt="PyQt6",
-            runtime_dlls=("vcruntime140.dll",),
+            runtime_dlls=("vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll"),
             extra_hidden_imports=(
                 "PyQt5",
                 "PyQt5.QtCore",
