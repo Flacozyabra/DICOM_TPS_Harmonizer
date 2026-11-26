@@ -1232,11 +1232,29 @@ class DicomSplitterApp(QMainWindow):
         self.log_textbox.append(formatted_text)
         self.log_textbox.moveCursor(QTextCursor.MoveOperation.End)
 
+    def _set_start_button_mode(self, processing: bool) -> None:
+        """Переключает стиль и текст кнопки пуска/остановки без пересборки всех стилей окна."""
+        if processing:
+            self.start_btn.setObjectName("stopBtn")
+            self.start_btn.setText(self.loc("stop_optimization"))
+        else:
+            self.start_btn.setObjectName("startBtn")
+            self.start_btn.setText(self.loc("run_optimization"))
+        style = self.start_btn.style()
+        if style is not None:
+            style.unpolish(self.start_btn)
+            style.polish(self.start_btn)
+        self.start_btn.update()
+
     def update_progress(self, current: int, total: int) -> None:
-        if total > 0:
-            prog = current / total
-            pct = int(prog * 100)
+        if total > 0 and current > 0:
+            if self.progress_bar.maximum() == 0:
+                self.progress_bar.setRange(0, 100)
+            pct = min(100, max(0, int((current / total) * 100)))
             self.progress_bar.setValue(pct)
+        elif self.is_processing:
+            if self.progress_bar.minimum() != 0 or self.progress_bar.maximum() != 0:
+                self.progress_bar.setRange(0, 0)
 
     def update_scan_progress(self, current: int, total: int) -> None:
         if self.scan_dialog:
@@ -1244,10 +1262,11 @@ class DicomSplitterApp(QMainWindow):
 
     def on_processing_finished(self) -> None:
         self.is_processing = False
-        self.start_btn.setObjectName("startBtn")
-        self.start_btn.setText(self.loc("run_optimization"))
         self.start_btn.setEnabled(True)
-        self.apply_styles() # Обновит стиль (вернет синий цвет кнопки)
+        self._set_start_button_mode(False)
+        if self.progress_bar.maximum() == 0:
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setValue(0)
         self.set_gui_enabled(True)
         self.log_textbox.moveCursor(QTextCursor.MoveOperation.End)
 
@@ -1554,12 +1573,9 @@ class DicomSplitterApp(QMainWindow):
 
         self.is_processing = True
         self.stop_event.clear()
-        
-        self.start_btn.setObjectName("stopBtn")
-        self.start_btn.setText(self.loc("stop_optimization"))
-        self.apply_styles() # Обновит стиль (сделает кнопку красной)
-        
-        self.progress_bar.setValue(0)
+
+        self._set_start_button_mode(True)
+        self.progress_bar.setRange(0, 0)
         self.log_textbox.clear()
 
         config = ProcessingConfig(

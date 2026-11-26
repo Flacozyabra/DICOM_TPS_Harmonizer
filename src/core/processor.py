@@ -203,20 +203,11 @@ def _process_batch_task(batch_task: dict) -> dict:
         'error_count': 0,
         'no_pixel_count': 0,
         'series_positions': [],
+        'series_stats': {},
     }
 
     if not tasks:
         return results
-
-    # Для агрегации логов по всей серии
-    first_task = tasks[0]
-    modality = first_task['modality']
-    pat_name = first_task['pat_name']
-    pat_id = first_task['pat_id']
-    series_folder = first_task['series_folder']
-
-    series_success = 0
-    series_errors = 0
 
     for task in tasks:
         file_path = task['file_path']
@@ -227,8 +218,24 @@ def _process_batch_task(batch_task: dict) -> dict:
         sop_class = task['sop_class']
         instance_number = task['instance_number']
         segment_idx = task['segment_idx']
+        modality = task['modality']
+        pat_name = task['pat_name']
+        pat_id = task['pat_id']
+        series_folder = task['series_folder']
         output_filename = task.get('output_filename')
         mf_file_suffix = task.get('mf_file_suffix', '')
+
+        series_stats = results['series_stats'].setdefault(
+            series_uid_mapped,
+            {
+                'modality': modality,
+                'pat_name': pat_name,
+                'pat_id': pat_id,
+                'series_folder': series_folder,
+                'success': 0,
+                'errors': 0,
+            },
+        )
 
         filename = file_path.name
 
@@ -245,7 +252,7 @@ def _process_batch_task(batch_task: dict) -> dict:
             tb = traceback.format_exc()
             results['status'] = 'error'
             results['error_count'] += 1
-            series_errors += 1
+            series_stats['errors'] += 1
             results['logs'].append(('log_pixel_error', filename, str(e)))
             results['logs'].append(('traceback', tb))
             continue
@@ -259,7 +266,7 @@ def _process_batch_task(batch_task: dict) -> dict:
                 tb = traceback.format_exc()
                 results['status'] = 'error'
                 results['error_count'] += 1
-                series_errors += 1
+                series_stats['errors'] += 1
                 results['logs'].append(('log_pixel_error', filename, str(e)))
                 results['logs'].append(('traceback', tb))
                 continue
@@ -271,7 +278,7 @@ def _process_batch_task(batch_task: dict) -> dict:
             if pixel_array.shape[0] != n_frames:
                 results['status'] = 'error'
                 results['error_count'] += 1
-                series_errors += 1
+                series_stats['errors'] += 1
                 results['logs'].append((
                     'log_pixel_error',
                     filename,
@@ -375,18 +382,18 @@ def _process_batch_task(batch_task: dict) -> dict:
                             results, cleaned_ds, out_path, modality, pat_name, target_dir.name
                         ):
                             results['success_count'] += 1
-                            series_success += 1
+                            series_stats['success'] += 1
                         else:
                             multiframe_errors += 1
                             results['error_count'] += 1
-                            series_errors += 1
+                            series_stats['errors'] += 1
                     except Exception as e:
                         tb = traceback.format_exc()
                         results['logs'].append(('log_frame_save_error', frame_idx + 1, filename, str(e)))
                         results['logs'].append(('traceback', tb))
                         multiframe_errors += 1
                         results['error_count'] += 1
-                        series_errors += 1
+                        series_stats['errors'] += 1
 
             if multiframe_errors == 0:
                 results['logs'].append(('log_split_success', modality, pat_name, pat_id, series_folder, filename, n_frames))
@@ -426,27 +433,36 @@ def _process_batch_task(batch_task: dict) -> dict:
                     results, cleaned_ds, out_path, modality, pat_name, series_folder
                 ):
                     results['success_count'] += 1
-                    series_success += 1
+                    series_stats['success'] += 1
                 else:
                     results['error_count'] += 1
-                    series_errors += 1
+                    series_stats['errors'] += 1
                     results['status'] = 'error'
             except Exception as e:
                 tb = traceback.format_exc()
                 results['logs'].append(('log_save_error', filename, str(e)))
                 results['logs'].append(('traceback', tb))
                 results['error_count'] += 1
-                series_errors += 1
+                series_stats['errors'] += 1
                 results['status'] = 'error'
 
-    # Добавляем агрегированный лог по серии
-    if series_success > 0:
-        if series_errors == 0:
-            results['logs'].append(('log_series_success', modality, pat_name, pat_id, series_folder, series_success))
-        else:
-            results['logs'].append(('log_series_warning', modality, pat_name, pat_id, series_folder, series_success, series_errors))
-
     return results
+
+
+def _compute_adaptive_chunk_size(num_series_files: int) -> int:
+    """Compute adaptive batch size (1..15) balancing parallelism and IPC overhead."""
+    if num_series_files <= 15:
+        return max(1, num_series_files // 2) if num_series_files >= 4 else 1
+    return min(15, max(5, num_series_files // 8))
+
+
+def _compute_worker_count(num_batches: int, cpu_count: Optional[int] = None) -> int:
+    """Cap worker processes at min(num_batches, 8, max(1, cpu_count - 1))."""
+    if num_batches <= 0:
+        return 1
+    cpus = cpu_count if cpu_count is not None else (os.cpu_count() or 4)
+    target_workers = max(1, min(cpus - 1, 8))
+    return min(num_batches, target_workers)
 
 
 def _read_header_task(file_path: Path) -> tuple:
@@ -500,6 +516,8 @@ class DicomProcessor:
         self.assigned_dest_dirs: Dict[Path, str] = {}
         self.dest_dir_used_names: Dict[Path, Set[str]] = {}
         self.dest_dir_mf_counts: Dict[Path, int] = {}
+        self._progress_current: int = 0
+        self._progress_total: int = 0
 
     def _load_translations(self, lang: str) -> Dict[str, str]:
         """Загружает файл локализации для процессора."""
@@ -542,6 +560,16 @@ class DicomProcessor:
         self.logger.log(self.loc("log_setting_exclude", self.config.exclude_reports))
         self.logger.log(self.loc("log_setting_exclude_localizers", self.config.exclude_localizers))
 
+        total_files = 0
+        self.success_count = 0
+        self.error_count = 0
+        self.processed_count = 0
+        self.non_dicom_count = 0
+        self.no_pixel_count = 0
+        self.excluded_count = 0
+        self._progress_current = 0
+        self._progress_total = 0
+
         try:
             if self.selected_files is not None:
                 all_files = self.selected_files
@@ -564,12 +592,11 @@ class DicomProcessor:
 
             self.logger.log(self.loc("log_files_found", total_files))
 
-            self.success_count = 0
-            self.error_count = 0
-            self.processed_count = 0
-            self.non_dicom_count = 0
-            self.no_pixel_count = 0
-            self.excluded_count = 0
+            # Phase weights per input file: 1 unit for header scan (0-25%), 3 units for conversion (25-100%)
+            self._progress_total = total_files * 4
+            self.logger.log(self.loc("log_reading_headers", total_files))
+            self.logger.update_progress(0, self._progress_total)
+
             self.assigned_dest_dirs.clear()
             self.dest_dir_used_names.clear()
             self.dest_dir_mf_counts.clear()
@@ -577,19 +604,22 @@ class DicomProcessor:
 
             # Группируем файлы по сериям для предварительного анализа (параллельный быстрый проход)
             series_groups = {}
-            
+            header_step = max(1, total_files // 25)
+            headers_done = 0
+
             # Используем ThreadPoolExecutor для параллельного чтения заголовков (I/O)
             with ThreadPoolExecutor(max_workers=32) as header_executor:
                 if self.stop_event.is_set():
                     self.logger.log(self.loc("log_stop_user"), "warning")
                     return
-                
+
                 header_futures = [header_executor.submit(_read_header_task, fp) for fp in all_files]
                 for fut in as_completed(header_futures):
                     if self.stop_event.is_set():
                         self.logger.log(self.loc("log_stop_user"), "warning")
                         break
-                    
+
+                    headers_done += 1
                     file_path, ds, err = fut.result()
                     filename = file_path.name
                     if err is not None:
@@ -600,9 +630,14 @@ class DicomProcessor:
                             self.logger.log(self.loc("log_read_error", filename, str(err)), "error")
                             self.error_count += 1
                         self.processed_count += 1
-                        self.logger.update_progress(self.processed_count, total_files)
+                        self._progress_current += 4
+                        self.logger.update_progress(min(self._progress_current, self._progress_total), self._progress_total)
                         continue
-                    
+
+                    self._progress_current += 1
+                    if headers_done == 1 or headers_done % header_step == 0 or headers_done == total_files:
+                        self.logger.update_progress(min(self._progress_current, self._progress_total), self._progress_total)
+
                     pat_name = getattr(ds, 'PatientName', 'UNKNOWN')
                     pat_id = getattr(ds, 'PatientID', 'UNKNOWN')
 
@@ -652,27 +687,31 @@ class DicomProcessor:
                         items, segment_idx=0, total_files=total_files, tasks_list=sub_tasks
                     )
 
-            # Группируем sub_tasks по series_uid_mapped, чтобы каждая серия обрабатывалась
-            # в своем пакете (или делим серии на чанки по 50 файлов для балансировки нагрузки)
+            # Group sub_tasks by series_uid_mapped into adaptive batches (1..15 files per batch)
             from collections import defaultdict
             series_tasks = defaultdict(list)
             for task in sub_tasks:
                 series_tasks[task['series_uid_mapped']].append(task)
-                
+
             batch_tasks = []
+            series_remaining_batches: Dict[str, int] = defaultdict(int)
+            series_agg_stats: Dict[str, dict] = {}
             for s_uid, s_tasks in series_tasks.items():
-                chunk_size = 50
+                chunk_size = _compute_adaptive_chunk_size(len(s_tasks))
                 for i in range(0, len(s_tasks), chunk_size):
                     batch_tasks.append({
+                        'series_uid': s_uid,
                         'tasks': s_tasks[i:i + chunk_size],
-                        'config': self.config
+                        'config': self.config,
                     })
+                    series_remaining_batches[s_uid] += 1
 
             # Выполняем задачи в пуле процессов
             series_pos_map: Dict[str, List[Tuple[str, str, str, Optional[Tuple[float, float, float]]]]] = {}
             if batch_tasks and not self.stop_event.is_set():
-                num_workers = max(1, (os.cpu_count() or 4) - 1)
-                
+                num_workers = _compute_worker_count(len(batch_tasks))
+                self.logger.log(self.loc("log_starting_workers", len(batch_tasks), num_workers))
+
                 futures = {}
                 with ProcessPoolExecutor(max_workers=num_workers) as executor:
                     for b_task in batch_tasks:
@@ -692,6 +731,10 @@ class DicomProcessor:
                             self.logger.log(self.loc("log_stop_user"), "warning")
                             break
 
+                        batch_meta = futures[fut]
+                        batch_s_uid = batch_meta['series_uid']
+                        b_task_files_count = len(batch_meta['tasks'])
+
                         try:
                             res = fut.result()
                             self.success_count += res['success_count']
@@ -701,13 +744,27 @@ class DicomProcessor:
                             for s_uid, mod, p_name, s_label, ipp_tuple in res.get('series_positions', []):
                                 series_pos_map.setdefault(s_uid, []).append((mod, p_name, s_label, ipp_tuple))
 
+                            for s_uid, st in res.get('series_stats', {}).items():
+                                agg = series_agg_stats.setdefault(
+                                    s_uid,
+                                    {
+                                        'modality': st['modality'],
+                                        'pat_name': st['pat_name'],
+                                        'pat_id': st['pat_id'],
+                                        'series_folder': st['series_folder'],
+                                        'success': 0,
+                                        'errors': 0,
+                                    },
+                                )
+                                agg['success'] += st['success']
+                                agg['errors'] += st['errors']
+
                             for log_item in res['logs']:
                                 key = log_item[0]
                                 args = log_item[1:]
                                 if key == 'traceback':
                                     self.logger.log(args[0], "error")
                                 else:
-                                    # Определяем тег лога
                                     if key in ('log_pixel_error', 'log_frame_save_error', 'log_save_error', 'log_critical_error', 'log_pixel_length_error'):
                                         tag = "error"
                                     elif key in ('log_non_dicom', 'log_read_error', 'log_split_warning', 'log_files_not_found', 'log_stop_user', 'log_series_warning', 'log_reconstructed_ipp', 'log_duplicate_ipp'):
@@ -720,11 +777,43 @@ class DicomProcessor:
                         except Exception as e:
                             self.logger.log(self.loc("log_critical_error", str(e)), "error")
                             self.error_count += 1
+                            if batch_s_uid in series_agg_stats:
+                                series_agg_stats[batch_s_uid]['errors'] += b_task_files_count
 
-                        # Обновляем прогресс на число файлов в этом батче
-                        b_task_files_count = len(futures[fut]['tasks'])
+                        # Emit one aggregated summary log line once all chunks of a series complete
+                        series_remaining_batches[batch_s_uid] -= 1
+                        if series_remaining_batches[batch_s_uid] <= 0:
+                            agg = series_agg_stats.pop(batch_s_uid, None)
+                            if agg and agg['success'] > 0:
+                                if agg['errors'] == 0:
+                                    self.logger.log(
+                                        self.loc(
+                                            "log_series_success",
+                                            agg['modality'],
+                                            agg['pat_name'],
+                                            agg['pat_id'],
+                                            agg['series_folder'],
+                                            agg['success'],
+                                        ),
+                                        "success",
+                                    )
+                                else:
+                                    self.logger.log(
+                                        self.loc(
+                                            "log_series_warning",
+                                            agg['modality'],
+                                            agg['pat_name'],
+                                            agg['pat_id'],
+                                            agg['series_folder'],
+                                            agg['success'],
+                                            agg['errors'],
+                                        ),
+                                        "warning",
+                                    )
+
                         self.processed_count += b_task_files_count
-                        self.logger.update_progress(self.processed_count, total_files)
+                        self._progress_current += b_task_files_count * 3
+                        self.logger.update_progress(min(self._progress_current, self._progress_total), self._progress_total)
 
             # Post-verification: check for duplicate ImagePositionPatient within each output series
             if not self.stop_event.is_set():
@@ -765,7 +854,10 @@ class DicomProcessor:
             self.logger.log(self.loc("log_critical_error", ex), "error")
             self.logger.log(traceback.format_exc(), "error")
         finally:
-            self.logger.update_progress(self.processed_count, total_files)
+            if self._progress_total > 0:
+                if not self.stop_event.is_set() and self.processed_count >= total_files:
+                    self._progress_current = self._progress_total
+                self.logger.update_progress(min(self._progress_current, self._progress_total), self._progress_total)
 
     def _prepare_tasks_for_segment(
         self,
@@ -802,7 +894,9 @@ class DicomProcessor:
                 self.logger.log(self.loc("log_skip_service", series_desc, modality))
                 self.excluded_count += len(items)
                 self.processed_count += len(items)
-                self.logger.update_progress(self.processed_count, total_files)
+                self._progress_current += len(items) * 3
+                if self._progress_total > 0:
+                    self.logger.update_progress(min(self._progress_current, self._progress_total), self._progress_total)
                 return
 
         # Исключение локалайзеров
@@ -827,7 +921,9 @@ class DicomProcessor:
                 self.logger.log(self.loc("log_skip_localizer", series_desc, modality))
                 self.excluded_count += len(items)
                 self.processed_count += len(items)
-                self.logger.update_progress(self.processed_count, total_files)
+                self._progress_current += len(items) * 3
+                if self._progress_total > 0:
+                    self.logger.update_progress(min(self._progress_current, self._progress_total), self._progress_total)
                 return
 
         patient_name = make_safe_filename(pat_name)

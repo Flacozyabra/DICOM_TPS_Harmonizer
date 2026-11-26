@@ -10,7 +10,12 @@ from pydicom.uid import generate_uid
 
 from src.core.config import ProcessingConfig
 from src.core.converter import ENHANCED_CONTAINER_TAGS_TUPLES
-from src.core.processor import DicomProcessor, verify_dicom_series_on_disk
+from src.core.processor import (
+    DicomProcessor,
+    _compute_adaptive_chunk_size,
+    _compute_worker_count,
+    verify_dicom_series_on_disk,
+)
 from src.utils.helpers import compute_slice_normal
 from src.utils.logger import BaseLogger
 from tests.helpers_dicom import CLASSIC_MR_SOP_CLASS, build_enhanced_mr_dataset, save_dataset
@@ -373,6 +378,62 @@ class ProcessorMultiframeTests(unittest.TestCase):
                 ),
                 f"Expected frame count mismatch error in logs: {logger.records}",
             )
+
+    def test_adaptive_chunking_and_worker_cap_bounds(self):
+        self.assertEqual(_compute_adaptive_chunk_size(1), 1)
+        self.assertEqual(_compute_adaptive_chunk_size(3), 1)
+        self.assertEqual(_compute_adaptive_chunk_size(6), 3)
+        self.assertEqual(_compute_adaptive_chunk_size(15), 7)
+        self.assertLessEqual(_compute_adaptive_chunk_size(500), 15)
+        self.assertGreaterEqual(_compute_adaptive_chunk_size(500), 5)
+
+        self.assertEqual(_compute_worker_count(3, cpu_count=16), 3)
+        self.assertEqual(_compute_worker_count(20, cpu_count=16), 8)
+        self.assertEqual(_compute_worker_count(5, cpu_count=1), 1)
+        self.assertEqual(_compute_worker_count(5, cpu_count=4), 3)
+
+    def test_phase_progress_and_single_series_log_across_batches(self):
+        axial = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0)
+        study_uid = generate_uid()
+        series_uid = generate_uid()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            in_dir = Path(tmpdir) / "in"
+            out_dir = Path(tmpdir) / "out"
+            for idx in range(6):
+                ds, _ = build_enhanced_mr_dataset(
+                    [{"position": (0.0, 0.0, float(idx * 3)), "orientation": axial}],
+                    study_uid=study_uid,
+                    series_uid=series_uid,
+                    series_number=901,
+                    series_description="MULTI_CHUNK_SERIES",
+                )
+                ds.NumberOfFrames = 1
+                ds.InstanceNumber = idx + 1
+                ds.ImagePositionPatient = [0.0, 0.0, float(idx * 3)]
+                ds.ImageOrientationPatient = list(axial)
+                save_dataset(ds, in_dir / f"s_{idx:02d}.dcm")
+
+            proc, logger = self._run_processor(in_dir, out_dir, _default_config())
+            self.assertEqual(proc.success_count, 6)
+            self.assertEqual(proc.error_count, 0)
+
+            # Should emit header progress (25% range) before batch completion and end at 100%
+            ratios = [cur / tot for cur, tot in logger.progress if tot > 0]
+            self.assertTrue(ratios)
+            self.assertTrue(any(0.0 < r <= 0.25 for r in ratios), f"Expected header progress updates in {logger.progress}")
+            self.assertEqual(ratios[-1], 1.0)
+            self.assertEqual(ratios, sorted(ratios))
+
+            # 6 slices split into 2 batches (chunk_size=3), yet series summary should log once
+            series_logs = [msg for tag, msg in logger.records if tag == "success" and "successfully optimized 6 slices" in msg]
+            self.assertEqual(len(series_logs), 1, f"Expected single series summary log, got: {logger.records}")
+            self.assertTrue(any("Reading DICOM headers" in msg for _, msg in logger.records))
+            self.assertTrue(any("Starting optimization (2 batches" in msg for _, msg in logger.records))
+
+            # Missing input_dir returns cleanly without UnboundLocalError
+            proc_missing, _ = self._run_processor(Path(tmpdir) / "nonexistent", out_dir, _default_config())
+            self.assertEqual(proc_missing.success_count, 0)
 
 
 if __name__ == "__main__":

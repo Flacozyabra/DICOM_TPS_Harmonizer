@@ -109,6 +109,40 @@ class GuiAndUpdaterTests(unittest.TestCase):
                 self.assertTrue(saved["processing_settings"]["split_multiframe"])
                 win.close()
 
+    def test_progress_bar_indeterminate_until_positive_progress(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cfg_path = Path(tmpdir) / "config.json"
+            with mock.patch.object(DicomSplitterApp, "get_config_path", return_value=cfg_path), \
+                 mock.patch.object(DicomSplitterApp, "check_updates", return_value=None):
+                win = DicomSplitterApp()
+                win.is_processing = True
+                win._set_start_button_mode(True)
+                win.progress_bar.setRange(0, 0)
+
+                self.assertEqual(win.start_btn.objectName(), "stopBtn")
+                self.assertEqual(win.progress_bar.minimum(), 0)
+                self.assertEqual(win.progress_bar.maximum(), 0)
+
+                # Zero progress keeps indeterminate marquee active while running
+                win.update_progress(0, 40)
+                self.assertEqual(win.progress_bar.maximum(), 0)
+
+                # First positive update switches to deterministic percentage mode
+                win.update_progress(10, 40)
+                self.assertEqual(win.progress_bar.minimum(), 0)
+                self.assertEqual(win.progress_bar.maximum(), 100)
+                self.assertEqual(win.progress_bar.value(), 25)
+
+                # Early abort while still indeterminate resets bar back to 0..100
+                win.progress_bar.setRange(0, 0)
+                win.on_processing_finished()
+                self.assertFalse(win.is_processing)
+                self.assertEqual(win.start_btn.objectName(), "startBtn")
+                self.assertEqual(win.progress_bar.minimum(), 0)
+                self.assertEqual(win.progress_bar.maximum(), 100)
+                self.assertEqual(win.progress_bar.value(), 0)
+                win.close()
+
     def test_updater_sha256_and_tls_fallback(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             sample = Path(tmpdir) / "update.tmp"
