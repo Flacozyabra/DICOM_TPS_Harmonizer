@@ -1,5 +1,10 @@
 # DICOM TPS Harmonizer
 
+[![Release](https://img.shields.io/github/v/release/Flacozyabra/DICOM_TPS_Harmonizer?color=2563EB)](https://github.com/Flacozyabra/DICOM_TPS_Harmonizer/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/Flacozyabra/DICOM_TPS_Harmonizer/total?color=10B981)](https://github.com/Flacozyabra/DICOM_TPS_Harmonizer/releases)
+[![Platform](https://img.shields.io/badge/platform-Windows%207%20%2F%2010%20%2F%2011-0078D6)](https://github.com/Flacozyabra/DICOM_TPS_Harmonizer/releases)
+[![License](https://img.shields.io/github/license/Flacozyabra/DICOM_TPS_Harmonizer?color=64748B)](LICENSE)
+
 [Русский](#русский) | [English](#english)
 
 ---
