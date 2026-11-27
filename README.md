@@ -32,8 +32,6 @@
 * **Удобная структура папок:** Группирует результаты с защитой от коллизий имён:  
   `Dicom_output / <Имя_Пациента>_<ID_Пациента> / <Модальность_НомерСерии_Описание> / slice_XXXX.dcm`
 * **Интерактивный DICOM вьюер:** Встроенный инструмент просмотра серий с поддержкой масштабирования (Zoom), перемещения (Pan), измерительной линейки и адаптивной настройки окна HU (включая МРТ).
-* **Сохранение настроек и Drag-and-Drop:** Автоматически сохраняет пути, тему, язык и все 8 параметров оптимизации в `config.json`, поддерживает перетаскивание папок в окно.
-* **Современный GUI и автообновление:** Интерфейс на базе `PyQt6` (с режимом совместимости `PyQt5` в Legacy-сборке), цветовым логированием по сериям, мультиязычностью (RU/EN) и проверкой SHA-256 при автообновлении с GitHub.
 
 ### Редакции готовых сборок (EXE)
 В разделе [Releases](https://github.com/Flacozyabra/DICOM_TPS_Harmonizer/releases) на GitHub доступны **две версии** исполняемого файла — выберите подходящую для вашего компьютера (автообновление автоматически сохраняет выбранную редакцию):
@@ -44,26 +42,6 @@
 * **`DICOM_TPS_Harmonizer_Legacy.exe`** *(Совместимая редакция — для Windows 7 / 8.1 и старых сборок Windows 10)*
   * Собрана на **Python 3.8.10** и **`PyQt5`** (через встроенный слой совместимости).
   * Предназначена для устаревших ПК, корпоративных сборок Windows 10 LTSC (1607/1809), Windows Server или компьютеров, на которых основная версия не запускается с ошибкой `DLL load failed while importing QtWidgets`.
-
-### Сборка EXE из исходников
-Перед сборкой установите `pyinstaller` (и `PyQt5` для Legacy-версии):
-* **Основная редакция (`DICOM_TPS_Harmonizer.exe`):** сборка на Python 3.10+ и `PyQt6`:
-  ```bash
-  python build_PyQt6.py
-  ```
-* **Совместимая редакция (`DICOM_TPS_Harmonizer_Legacy.exe`):** для поддержки Windows 7 сборку необходимо выполнять на **Python 3.8** с `PyQt5`:
-  ```bash
-  python build_PyQt5_Legacy.py
-  ```
-
-### Быстрый запуск из исходников (Windows)
-Просто запустите файл [run.bat](run.bat) в корневой папке проекта. Он автоматически активирует виртуальное окружение и запустит программу.
-
-### Установка вручную
-1. Создайте виртуальное окружение: `python -m venv .venv`
-2. Активируйте его: `.venv\Scripts\activate` (Windows) или `source .venv/bin/activate` (Linux/macOS)
-3. Установите зависимости: `pip install -r requirements.txt`
-4. Запустите: `python main.py` *(для принудительного запуска под `PyQt5` задайте `FORCE_PYQT5=1`)*
 
 ---
 
@@ -79,8 +57,6 @@
 * **Collision-Safe Directory Hierarchy:** Outputs structured patient datasets:  
   `Dicom_output / <PatientName>_<PatientID> / <Modality_SeriesNumber_Description> / slice_XXXX.dcm`
 * **Interactive DICOM Viewer:** Integrated series visualization featuring Zoom, Pan, measurement ruler, and adaptive HU/intensity Level/Width sliders.
-* **Persistent Settings & Drag-and-Drop:** Remembers paths, theme, language, and all 8 processing checkboxes in `config.json`, plus drag-and-drop directory selection.
-* **Modern GUI & Auto-Update:** Interface built with `PyQt6` (with `PyQt5` compatibility layer in the Legacy edition), per-series log summaries, RU/EN localization, and SHA-256 verified GitHub updates.
 
 ### Executable (EXE) Editions
 Two standalone Windows `.exe` editions are available in the [Releases](https://github.com/Flacozyabra/DICOM_TPS_Harmonizer/releases) section — choose the one that best fits your system (auto-update automatically preserves your current edition):
@@ -91,23 +67,3 @@ Two standalone Windows `.exe` editions are available in the [Releases](https://g
 * **`DICOM_TPS_Harmonizer_Legacy.exe`** *(Compatibility Edition — Windows 7 / 8.1 / Legacy Windows 10)*
   * Built on **Python 3.8.10** with **`PyQt5`** via the built-in compatibility shim.
   * Designed for legacy workstations, Windows 10 LTSC (1607/1809), Windows Server, or machines where the modern build fails with `DLL load failed while importing QtWidgets`.
-
-### Building EXE from source
-Install `pyinstaller` (and `PyQt5` for the Legacy edition) before building:
-* **Modern Edition (`DICOM_TPS_Harmonizer.exe`):** compile using Python 3.10+ and `PyQt6`:
-  ```bash
-  python build_PyQt6.py
-  ```
-* **Legacy Edition (`DICOM_TPS_Harmonizer_Legacy.exe`):** use **Python 3.8** with `PyQt5` for full Windows 7 compatibility:
-  ```bash
-  python build_PyQt5_Legacy.py
-  ```
-
-### Quick Start from source (Windows)
-Double-click [run.bat](run.bat) in the project folder. It will configure the virtual environment and start the application automatically.
-
-### Manual Installation
-1. Create virtual environment: `python -m venv .venv`
-2. Activate it: `.venv\Scripts\activate` (Windows) or `source .venv/bin/activate` (Linux/macOS)
-3. Install dependencies: `pip install -r requirements.txt`
-4. Launch the app: `python main.py` *(set `FORCE_PYQT5=1` to force running with `PyQt5`)*
